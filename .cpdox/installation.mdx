@@ -1,0 +1,130 @@
+# Installing the Extension
+
+This guide covers how to install and run the ControlPanel extension in your local VS Code environment.
+
+## Prerequisites
+
+- Node.js (v16 or higher)
+- npm (v7 or higher)
+- VS Code (v1.85.0 or higher)
+
+## Installation Steps
+
+### 1. Install Dependencies
+
+First, install all required npm packages:
+
+```bash
+npm install
+```
+
+<TaskLink label="npm: install" />
+
+### 2. Compile the Extension
+
+Compile the extension in development mode:
+
+```bash
+npm run compile
+```
+
+<TaskLink label="compile" />
+
+### 3. Package the Extension
+
+Create a `.vsix` file that can be installed in VS Code:
+
+```bash
+npm run package
+```
+
+<TaskLink label="package" />
+
+This will generate a file named `controlpanel-0.0.1.vsix` (or similar, based on your version) in the project root.
+
+### 4. Install the Extension in VS Code
+
+Install the packaged extension using the VS Code CLI:
+
+```bash
+code --install-extension controlpanel-0.0.1.vsix
+```
+
+<TaskLink label="install-extension" />
+
+Alternatively, you can:
+- Open VS Code
+- Press `Ctrl+Shift+P` (or `Cmd+Shift+P` on Mac)
+- Type "Extensions: Install from VSIX..."
+- Select the `.vsix` file from your project directory
+
+### 5. Reload VS Code
+
+After installation, reload VS Code to activate the extension:
+
+```bash
+code --reload
+```
+
+Or press `Ctrl+Shift+P` and select "Developer: Reload Window"
+
+## Development Mode
+
+For development and testing, you don't need to package and install the extension. Instead:
+
+1. Open the project in VS Code
+2. Press `F5` to launch the Extension Development Host
+3. This opens a new VS Code window with your extension loaded
+4. Make changes and press `Ctrl+R` in the Extension Development Host to reload
+
+### Watch Mode
+
+To automatically recompile when you make changes:
+
+```bash
+npm run watch
+```
+
+<TaskLink label="watch" />
+
+## Updating the Extension
+
+When you make changes and want to update the installed extension:
+
+1. Compile the changes: `npm run compile`
+2. Package the extension: `npm run package`
+3. Uninstall the old version (optional): `code --uninstall-extension your-publisher-name.controlpanel`
+4. Install the new version: `code --install-extension controlpanel-0.0.1.vsix`
+5. Reload VS Code
+
+<TaskLink label="reinstall-extension" />
+
+## Troubleshooting
+
+### Extension Not Appearing
+
+- Ensure you've reloaded VS Code after installation
+- Check the Extensions view to verify installation
+- Look for errors in the Developer Console (`Help > Toggle Developer Tools`)
+
+### Build Errors
+
+- Run `npm run lint` to check for code issues
+- Ensure all dependencies are installed: `npm install`
+- Clear the `dist` folder and rebuild
+
+### Package Errors
+
+- Ensure `@vscode/vsce` is installed: `npm install -g @vscode/vsce`
+- Check that `package.json` has all required fields
+
+## Next Steps
+
+Once installed, the ControlPanel extension will appear in your Activity Bar with a rocket icon. Click it to:
+- View documentation
+- Run tasks
+- Manage your development workflow
+
+For more information, see:
+- [Development Guide](development.mdx)
+- [Deployment Guide](deployment.mdx)

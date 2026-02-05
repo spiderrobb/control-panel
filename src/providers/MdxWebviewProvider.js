@@ -10,6 +10,8 @@ class MdxWebviewProvider {
     this._taskHierarchy = new Map(); // Map<parentLabel, Set<childLabel>>
     this._taskStartTimes = new Map(); // Map<label, timestamp>
     this._taskTerminals = new Map(); // Map<label, terminal>
+    this._taskFailures = new Map(); // Map<label, {exitCode, reason}>
+    this._taskStates = new Map(); // Map<label, 'starting'|'running'|'stopping'|'stopped'|'failed'>
     
     // Watch for task execution changes
     this._taskExecution = vscode.tasks.onDidStartTaskProcess((e) => {
@@ -53,6 +55,59 @@ class MdxWebviewProvider {
     return sum / durations.length;
   }
 
+  // Recently used tasks
+  async getRecentlyUsedTasks() {
+    return this._context.globalState.get('recentlyUsedTasks', []);
+  }
+
+  async addRecentlyUsedTask(label) {
+    let recent = await this.getRecentlyUsedTasks();
+    // Remove if already exists
+    recent = recent.filter(t => t !== label);
+    // Add to front
+    recent.unshift(label);
+    // Keep only last 5
+    recent = recent.slice(0, 5);
+    await this._context.globalState.update('recentlyUsedTasks', recent);
+    
+    // Notify webview
+    this._view?.webview.postMessage({
+      type: 'updateRecentlyUsed',
+      tasks: recent
+    });
+  }
+
+  // Starred tasks
+  async getStarredTasks() {
+    return this._context.globalState.get('starredTasks', []);
+  }
+
+  async toggleStarTask(label) {
+    let starred = await this.getStarredTasks();
+    if (starred.includes(label)) {
+      starred = starred.filter(t => t !== label);
+    } else {
+      // Limit to 20 starred tasks
+      if (starred.length >= 20) {
+        this._view?.webview.postMessage({
+          type: 'error',
+          message: 'Maximum 20 starred tasks allowed. Remove one to add another.'
+        });
+        return starred;
+      }
+      starred.push(label);
+    }
+    await this._context.globalState.update('starredTasks', starred);
+    
+    // Notify webview
+    this._view?.webview.postMessage({
+      type: 'updateStarred',
+      tasks: starred
+    });
+    
+    return starred;
+  }
+
   // Subtask tracking
   addSubtask(parentLabel, childLabel) {
     if (!this._taskHierarchy.has(parentLabel)) {
@@ -82,6 +137,49 @@ class MdxWebviewProvider {
     return subtasks ? Array.from(subtasks) : [];
   }
 
+  async restoreRunningTasksState() {
+    // Re-send taskStarted messages for tasks that are still running
+    // This handles the case where the webview is hidden/shown or extension view is switched
+    if (this._runningTasks.size === 0) {
+      return;
+    }
+
+    for (const [label, execution] of this._runningTasks.entries()) {
+      const startTime = this._taskStartTimes.get(label);
+      const state = this._taskStates.get(label);
+      const failureInfo = this._taskFailures.get(label);
+      
+      if (!startTime) continue;
+
+      const history = await this.getTaskHistory(label);
+      const avgDuration = this.getAverageDuration(history.durations);
+      const subtasks = this.getTaskHierarchy(label);
+
+      // Send appropriate message based on current state
+      if (failureInfo) {
+        this._view?.webview.postMessage({
+          type: 'taskFailed',
+          taskLabel: label,
+          exitCode: failureInfo.exitCode,
+          reason: failureInfo.reason,
+          duration: Date.now() - startTime,
+          subtasks
+        });
+      } else {
+        this._view?.webview.postMessage({
+          type: 'taskStarted',
+          taskLabel: label,
+          execution: execution,
+          startTime,
+          avgDuration,
+          isFirstRun: history.count === 0,
+          subtasks,
+          state: state || 'running'
+        });
+      }
+    }
+  }
+
   resolveWebviewView(webviewView, context, token) {
     this._view = webviewView;
 
@@ -93,6 +191,9 @@ class MdxWebviewProvider {
     };
 
     webviewView.webview.html = this._getHtmlForWebview(webviewView.webview);
+    
+    // Restore state for running tasks when webview reconnects
+    this.restoreRunningTasksState();
 
     // Handle messages from the webview
     webviewView.webview.onDidReceiveMessage(async (message) => {
@@ -115,6 +216,21 @@ class MdxWebviewProvider {
           break;
         case 'openTaskDefinition':
           await this.openTaskDefinition(message.label);
+          break;
+        case 'toggleStar':
+          await this.toggleStarTask(message.label);
+          break;
+        case 'getTaskLists':
+          const recent = await this.getRecentlyUsedTasks();
+          const starred = await this.getStarredTasks();
+          this._view?.webview.postMessage({
+            type: 'updateRecentlyUsed',
+            tasks: recent
+          });
+          this._view?.webview.postMessage({
+            type: 'updateStarred',
+            tasks: starred
+          });
           break;
       }
     });
@@ -156,11 +272,10 @@ class MdxWebviewProvider {
 
     try {
       const content = fs.readFileSync(filePath, 'utf8');
-      const parsedContent = this.parseMdxContent(content);
       
       this._view?.webview.postMessage({
         type: 'loadMdx',
-        content: parsedContent,
+        content: content, // Send raw MDX content
         file: fileName
       });
     } catch (error) {
@@ -225,6 +340,52 @@ class MdxWebviewProvider {
     });
   }
 
+  async getTaskDependencies(task) {
+    // 1. Check definition (extension provided tasks)
+    if (task.definition && task.definition.dependsOn) {
+      return Array.isArray(task.definition.dependsOn) 
+        ? task.definition.dependsOn 
+        : [task.definition.dependsOn];
+    }
+    
+    // 2. Check tasks.json (configured tasks)
+    // Gather potential workspace folders to check
+    const folders = [];
+    if (task.scope && task.scope.uri) {
+      folders.push(task.scope);
+    } else if (vscode.workspace.workspaceFolders) {
+      folders.push(...vscode.workspace.workspaceFolders);
+    }
+
+    for (const folder of folders) {
+      const tasksJsonPath = path.join(folder.uri.fsPath, '.vscode', 'tasks.json');
+      if (fs.existsSync(tasksJsonPath)) {
+        try {
+          const content = fs.readFileSync(tasksJsonPath, 'utf8');
+          // Basic JSONC cleanup: remove comments and trailing commas
+          const jsonContent = content
+            .replace(/\/\/.*$/gm, '') // Remove // comments
+            .replace(/\/\*[\s\S]*?\*\//g, '') // Remove /* */ comments
+            .replace(/,(\s*[\]}])/g, '$1'); // Remove trailing commas
+            
+          const config = JSON.parse(jsonContent);
+          
+          if (config.tasks) {
+            const taskConfig = config.tasks.find(t => t.label === task.name);
+            if (taskConfig && taskConfig.dependsOn) {
+              return Array.isArray(taskConfig.dependsOn) 
+                ? taskConfig.dependsOn 
+                : [taskConfig.dependsOn];
+            }
+          }
+        } catch (e) {
+          console.warn('Failed to parse tasks.json dependencies:', e);
+        }
+      }
+    }
+    return [];
+  }
+
   async runTask(label) {
     const tasks = await vscode.tasks.fetchTasks();
     const task = tasks.find(t => t.name === label);
@@ -233,15 +394,11 @@ class MdxWebviewProvider {
       const startTime = Date.now();
       
       // Check if task has dependencies
-      const definition = task.definition;
+      const dependencies = await this.getTaskDependencies(task);
       let subtasks = [];
       
-      if (definition && definition.dependsOn) {
+      if (dependencies.length > 0) {
         // Register dependencies as subtasks
-        const dependencies = Array.isArray(definition.dependsOn) 
-          ? definition.dependsOn 
-          : [definition.dependsOn];
-        
         dependencies.forEach(dep => {
           // Handle both string and object forms of dependsOn
           const depLabel = typeof dep === 'string' ? dep : dep.label || dep.task;
@@ -270,6 +427,7 @@ class MdxWebviewProvider {
       
       const execution = await vscode.tasks.executeTask(task);
       this._runningTasks.set(label, execution);
+      await this.addRecentlyUsedTask(label);
     } else {
       vscode.window.showErrorMessage(`Task not found: ${label}`);
     }
@@ -277,9 +435,46 @@ class MdxWebviewProvider {
 
   async stopTask(label) {
     const execution = this._runningTasks.get(label);
-    if (execution) {
+    const state = this._taskStates.get(label);
+    
+    // Don't try to stop if already stopped or failed
+    if (!execution || state === 'stopped' || state === 'failed') {
+      this._view?.webview.postMessage({
+        type: 'taskStateChanged',
+        taskLabel: label,
+        state: state || 'stopped',
+        canStop: false,
+        canFocus: false
+      });
+      return;
+    }
+    
+    try {
+      this._taskStates.set(label, 'stopping');
       execution.terminate();
       this._runningTasks.delete(label);
+      this._taskStates.set(label, 'stopped');
+      
+      this._view?.webview.postMessage({
+        type: 'taskStateChanged',
+        taskLabel: label,
+        state: 'stopped',
+        canStop: false,
+        canFocus: false
+      });
+    } catch (error) {
+      console.warn(`Failed to stop task ${label}:`, error);
+      // Still remove from UI even if terminate failed
+      this._runningTasks.delete(label);
+      this._taskStates.set(label, 'stopped');
+      
+      this._view?.webview.postMessage({
+        type: 'taskEnded',
+        taskLabel: label,
+        exitCode: 0,
+        duration: 0,
+        subtasks: []
+      });
     }
   }
 
@@ -291,6 +486,15 @@ class MdxWebviewProvider {
     
     if (terminal) {
       terminal.show();
+    } else {
+      // Terminal doesn't exist or was closed
+      this._view?.webview.postMessage({
+        type: 'taskStateChanged',
+        taskLabel: label,
+        canFocus: false,
+        message: 'Terminal not found'
+      });
+      vscode.window.showWarningMessage(`Terminal for task "${label}" not found. It may have been closed.`);
     }
   }
 
@@ -343,6 +547,10 @@ class MdxWebviewProvider {
     const startTime = Date.now();
     
     this._taskStartTimes.set(label, startTime);
+    this._taskStates.set(label, 'running');
+    this._runningTasks.set(label, event.execution);
+    // Clear any previous failure state
+    this._taskFailures.delete(label);
     
     // Check if this task is a subtask of any running task
     this._taskHierarchy.forEach((subtasks, parentLabel) => {
@@ -376,38 +584,126 @@ class MdxWebviewProvider {
     const label = event.execution.task.name;
     const startTime = this._taskStartTimes.get(label);
     const duration = startTime ? Date.now() - startTime : 0;
+    const exitCode = event.exitCode !== undefined ? event.exitCode : 0;
+    const failed = exitCode !== 0;
     
-    // Update task history with duration
-    this.updateTaskHistory(label, duration);
+    // Update task history with duration (only if successful)
+    if (!failed) {
+      this.updateTaskHistory(label, duration);
+    }
     
-    this._runningTasks.delete(label);
-    this._taskStartTimes.delete(label);
+    // Update state
+    this._taskStates.set(label, failed ? 'failed' : 'stopped');
+    
+    // Track failure if task failed
+    if (failed) {
+      this._taskFailures.set(label, {
+        exitCode,
+        reason: 'Task exited with non-zero code',
+        timestamp: Date.now()
+      });
+    }
     
     // Check if this task is a subtask of any running task
+    const parentTasks = [];
     this._taskHierarchy.forEach((subtasks, parentLabel) => {
       if (subtasks.has(label)) {
+        parentTasks.push(parentLabel);
         // Notify webview that a subtask ended
         this._view?.webview.postMessage({
           type: 'subtaskEnded',
           parentLabel,
           childLabel: label,
-          exitCode: event.exitCode
+          exitCode,
+          failed
         });
       }
     });
     
+    // If this task failed, propagate failure to parent tasks
+    if (failed && parentTasks.length > 0) {
+      parentTasks.forEach(parentLabel => {
+        this.propagateTaskFailure(parentLabel, label, exitCode);
+      });
+    }
+    
     // Get subtasks before cleaning up
     const subtasks = this.getTaskHierarchy(label);
     
-    // Clean up subtasks for this task
+    // Clean up
+    this._runningTasks.delete(label);
+    this._taskStartTimes.delete(label);
     this._taskHierarchy.delete(label);
     
+    // Send appropriate message based on success/failure
+    if (failed) {
+      this._view?.webview.postMessage({
+        type: 'taskFailed',
+        taskLabel: label,
+        exitCode,
+        reason: this._taskFailures.get(label)?.reason || 'Task failed',
+        duration,
+        subtasks
+      });
+    } else {
+      this._view?.webview.postMessage({
+        type: 'taskEnded',
+        taskLabel: label,
+        exitCode,
+        duration,
+        subtasks
+      });
+    }
+  }
+
+  propagateTaskFailure(parentLabel, failedSubtask, exitCode) {
+    // Mark parent as failed due to dependency failure
+    const parentExecution = this._runningTasks.get(parentLabel);
+    if (!parentExecution) {
+      return; // Parent already completed or doesn't exist
+    }
+
+    // Set failure state for parent
+    this._taskStates.set(parentLabel, 'failed');
+    this._taskFailures.set(parentLabel, {
+      exitCode: -1, // Special code for dependency failure
+      reason: `Dependency failed: ${failedSubtask} (exit code ${exitCode})`,
+      failedDependency: failedSubtask,
+      timestamp: Date.now()
+    });
+
+    // Terminate the parent task
+    try {
+      parentExecution.terminate();
+    } catch (error) {
+      console.warn(`Failed to terminate parent task ${parentLabel}:`, error);
+    }
+
+    const startTime = this._taskStartTimes.get(parentLabel);
+    const duration = startTime ? Date.now() - startTime : 0;
+    const subtasks = this.getTaskHierarchy(parentLabel);
+
+    // Notify webview
     this._view?.webview.postMessage({
-      type: 'taskEnded',
-      taskLabel: label,
-      exitCode: event.exitCode,
+      type: 'taskFailed',
+      taskLabel: parentLabel,
+      exitCode: -1,
+      reason: `Dependency failed: ${failedSubtask}`,
+      failedDependency: failedSubtask,
       duration,
       subtasks
+    });
+
+    // Clean up
+    this._runningTasks.delete(parentLabel);
+    this._taskStartTimes.delete(parentLabel);
+    this._taskHierarchy.delete(parentLabel);
+
+    // Recursively propagate to grandparents
+    this._taskHierarchy.forEach((subtasks, grandparentLabel) => {
+      if (subtasks.has(parentLabel)) {
+        this.propagateTaskFailure(grandparentLabel, parentLabel, -1);
+      }
     });
   }
 

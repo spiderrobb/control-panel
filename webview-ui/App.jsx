@@ -1,16 +1,28 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { evaluate } from '@mdx-js/mdx';
+import * as runtime from 'react/jsx-runtime';
+import DescriptionIcon from '@mui/icons-material/Description';
+import Button from '@mui/material/Button';
+import IconButton from '@mui/material/IconButton';
+import Typography from '@mui/material/Typography';
+import Chip from '@mui/material/Chip';
+import * as MuiIcons from '@mui/icons-material';
 import TaskLink from './components/TaskLink';
 import TaskList from './components/TaskList';
 import RunningTasksPanel from './components/RunningTasksPanel';
+import RecentTasksList from './components/RecentTasksList';
+import StarredTasksList from './components/StarredTasksList';
 
 // VS Code API
 const vscode = acquireVsCodeApi();
 
 function App() {
-  const [contentBlocks, setContentBlocks] = useState(null);
+  const [mdxContent, setMdxContent] = useState(null);
   const [currentFile, setCurrentFile] = useState('');
   const [tasks, setTasks] = useState([]);
   const [runningTasks, setRunningTasks] = useState({});
+  const [recentlyUsedTasks, setRecentlyUsedTasks] = useState([]);
+  const [starredTasks, setStarredTasks] = useState([]);
 
   useEffect(() => {
     // Listen for messages from the extension
@@ -19,24 +31,32 @@ function App() {
       
       switch (message.type) {
         case 'loadMdx':
-          setContentBlocks(message.content);
+          setMdxContent(message.content);
           setCurrentFile(message.file);
           break;
         case 'updateTasks':
           setTasks(message.tasks);
           break;
         case 'taskStarted':
-          setRunningTasks(prev => ({
-            ...prev,
-            [message.taskLabel]: {
-              running: true,
-              startTime: message.startTime || Date.now(),
-              execution: message.execution,
-              avgDuration: message.avgDuration,
-              isFirstRun: message.isFirstRun,
-              subtasks: message.subtasks || []
-            }
-          }));
+          setRunningTasks(prev => {
+            // Check if this task is already a subtask of another running task
+            const parentEntry = Object.entries(prev).find(([parentLabel, state]) => 
+              state.subtasks?.includes(message.taskLabel)
+            );
+            
+            return {
+              ...prev,
+              [message.taskLabel]: {
+                running: true,
+                startTime: message.startTime || Date.now(),
+                execution: message.execution,
+                avgDuration: message.avgDuration,
+                isFirstRun: message.isFirstRun,
+                subtasks: message.subtasks || [],
+                parentTask: parentEntry ? parentEntry[0] : null
+              }
+            };
+          });
           break;
         case 'taskEnded':
           setRunningTasks(prev => {
@@ -52,6 +72,51 @@ function App() {
                 });
               }, 1000);
             }
+            return updated;
+          });
+          break;
+        case 'taskFailed':
+          setRunningTasks(prev => {
+            const updated = { ...prev };
+            if (updated[message.taskLabel]) {
+              updated[message.taskLabel].running = false;
+              updated[message.taskLabel].failed = true;
+              updated[message.taskLabel].exitCode = message.exitCode;
+              updated[message.taskLabel].failureReason = message.reason;
+              updated[message.taskLabel].failedDependency = message.failedDependency;
+            } else {
+              // Task might not be in state yet, add it as failed
+              updated[message.taskLabel] = {
+                running: false,
+                failed: true,
+                exitCode: message.exitCode,
+                failureReason: message.reason,
+                failedDependency: message.failedDependency,
+                startTime: Date.now() - (message.duration || 0),
+                subtasks: message.subtasks || []
+              };
+            }
+            // Keep failed tasks visible longer (5 seconds)
+            setTimeout(() => {
+              setRunningTasks(current => {
+                const copy = { ...current };
+                delete copy[message.taskLabel];
+                return copy;
+              });
+            }, 5000);
+            return updated;
+          });
+          break;
+        case 'taskStateChanged':
+          setRunningTasks(prev => {
+            if (!prev[message.taskLabel]) return prev;
+            const updated = { ...prev };
+            updated[message.taskLabel] = {
+              ...updated[message.taskLabel],
+              state: message.state,
+              canStop: message.canStop !== undefined ? message.canStop : true,
+              canFocus: message.canFocus !== undefined ? message.canFocus : true
+            };
             return updated;
           });
           break;
@@ -82,8 +147,29 @@ function App() {
               ...updated[message.parentLabel],
               subtasks
             };
+            
+            // If subtask failed, mark it in parent's state
+            if (message.failed) {
+              if (!updated[message.parentLabel].failedSubtasks) {
+                updated[message.parentLabel].failedSubtasks = [];
+              }
+              updated[message.parentLabel].failedSubtasks.push({
+                label: message.childLabel,
+                exitCode: message.exitCode
+              });
+            }
+            
             return updated;
           });
+          break;
+        case 'updateRecentlyUsed':
+          setRecentlyUsedTasks(message.tasks);
+          break;
+        case 'updateStarred':
+          setStarredTasks(message.tasks);
+          break;
+        case 'error':
+          console.warn(message.message);
           break;
       }
     };
@@ -92,6 +178,7 @@ function App() {
     
     // Request initial content
     vscode.postMessage({ type: 'ready' });
+    vscode.postMessage({ type: 'getTaskLists' });
 
     return () => window.removeEventListener('message', messageHandler);
   }, []);
@@ -116,102 +203,100 @@ function App() {
     vscode.postMessage({ type: 'openTaskDefinition', label });
   };
 
-  const renderMarkdown = (markdown) => {
-    // Simple markdown to HTML conversion
-    let html = markdown
-      // Headers
-      .replace(/^### (.*$)/gim, '<h3>$1</h3>')
-      .replace(/^## (.*$)/gim, '<h2>$1</h2>')
-      .replace(/^# (.*$)/gim, '<h1>$1</h1>')
-      // Bold and italic
-      .replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>')
-      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-      .replace(/\*(.+?)\*/g, '<em>$1</em>')
-      // Code inline
-      .replace(/`([^`]+)`/g, '<code>$1</code>')
-      // Lists
-      .replace(/^\- (.+)$/gim, '<li>$1</li>')
-      .replace(/(<li>.*<\/li>)/s, '<ul>$1</ul>')
-      // Paragraphs
-      .replace(/\n\n/g, '</p><p>')
-      // Blockquotes
-      .replace(/^> (.+)$/gim, '<blockquote>$1</blockquote>');
-
-    // Handle links with navigation
-    html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (match, text, href) => {
-      if (href.endsWith('.mdx')) {
-        return `<a href="#" data-navigate="${href}">${text}</a>`;
-      }
-      return `<a href="${href}" target="_blank">${text}</a>`;
-    });
-
-    // Wrap in paragraph if not already wrapped
-    if (!html.startsWith('<h') && !html.startsWith('<ul') && !html.startsWith('<blockquote')) {
-      html = '<p>' + html + '</p>';
-    }
-    
-    // Fix broken tags
-    html = html.replace(/<p><\/p>/g, '');
-    html = html.replace(/<p>(<h[1-6]>)/g, '$1');
-    html = html.replace(/(<\/h[1-6]>)<\/p>/g, '$1');
-    html = html.replace(/<p>(<ul>)/g, '$1');
-    html = html.replace(/(<\/ul>)<\/p>/g, '$1');
-    html = html.replace(/<p>(<blockquote>)/g, '$1');
-    html = html.replace(/(<\/blockquote>)<\/p>/g, '$1');
-    
-    return html;
+  const handleToggleStar = (label) => {
+    vscode.postMessage({ type: 'toggleStar', label });
   };
 
-  const renderContentBlock = (block, index) => {
-    switch (block.type) {
-      case 'TaskLink':
+  // State for compiled MDX component
+  const [MdxModule, setMdxModule] = useState(null);
+  const [mdxError, setMdxError] = useState(null);
+  const [isCompiling, setIsCompiling] = useState(false);
+
+  // Create MDX components object with all available components
+  const mdxComponents = useMemo(() => ({
+    // Custom task components
+    TaskLink: (props) => (
+      <TaskLink
+        {...props}
+        onRun={handleRunTask}
+        onStop={handleStopTask}
+        onFocus={handleFocusTerminal}
+        onOpenDefinition={handleOpenDefinition}
+        taskState={runningTasks[props.label]}
+        allRunningTasks={runningTasks}
+        starredTasks={starredTasks}
+        onToggleStar={handleToggleStar}
+      />
+    ),
+    TaskList: (props) => (
+      <TaskList
+        {...props}
+        tasks={tasks}
+        onRun={handleRunTask}
+        onStop={handleStopTask}
+        onFocus={handleFocusTerminal}
+        onOpenDefinition={handleOpenDefinition}
+        runningTasks={runningTasks}
+        starredTasks={starredTasks}
+        onToggleStar={handleToggleStar}
+      />
+    ),
+    // Material UI components
+    Button,
+    IconButton,
+    Typography,
+    Chip,
+    // All Material UI icons
+    ...MuiIcons,
+    // Custom link handler for .mdx navigation
+    a: (props) => {
+      if (props.href?.endsWith('.mdx')) {
         return (
-          <TaskLink
-            key={index}
-            label={block.label}
-            onRun={handleRunTask}
-            onStop={handleStopTask}
-            onFocus={handleFocusTerminal}
-            onOpenDefinition={handleOpenDefinition}
-            taskState={runningTasks[block.label]}
-            allRunningTasks={runningTasks}
-          />
-        );
-      
-      case 'TaskList':
-        return (
-          <TaskList
-            key={index}
-            labelStartsWith={block.labelStartsWith}
-            tasks={tasks}
-            onRun={handleRunTask}
-            onStop={handleStopTask}
-            onFocus={handleFocusTerminal}
-            onOpenDefinition={handleOpenDefinition}
-            runningTasks={runningTasks}
-          />
-        );
-      
-      case 'text':
-      default:
-        const html = renderMarkdown(block.content);
-        return (
-          <div
-            key={index}
-            dangerouslySetInnerHTML={{ __html: html }}
+          <a
+            {...props}
+            href="#"
             onClick={(e) => {
-              // Handle navigation links
-              if (e.target.tagName === 'A' && e.target.dataset.navigate) {
-                e.preventDefault();
-                handleNavigate(e.target.dataset.navigate);
-              }
+              e.preventDefault();
+              handleNavigate(props.href);
             }}
           />
         );
+      }
+      return <a {...props} target="_blank" rel="noopener noreferrer" />;
     }
-  };
+  }), [tasks, runningTasks, starredTasks]);
 
-  if (!contentBlocks) {
+  // Compile MDX content when it changes
+  useEffect(() => {
+    if (!mdxContent) {
+      setMdxModule(null);
+      return;
+    }
+
+    async function compileMDX() {
+      setIsCompiling(true);
+      setMdxError(null);
+      
+      try {
+        // Evaluate MDX with components available
+        const { default: MDXComponent } = await evaluate(mdxContent, {
+          ...runtime,
+          development: false,
+          useMDXComponents: () => mdxComponents
+        });
+        setMdxModule(() => MDXComponent);
+      } catch (err) {
+        console.error('MDX compilation error:', err);
+        setMdxError(err.message);
+      } finally {
+        setIsCompiling(false);
+      }
+    }
+
+    compileMDX();
+  }, [mdxContent, mdxComponents]);
+
+  if (!mdxContent) {
     return (
       <div className="loading">
         <p>Loading Control Panel...</p>
@@ -223,17 +308,35 @@ function App() {
     <div className="app">
       {currentFile && (
         <div className="breadcrumb">
-          <span className="current-file">📄 {currentFile}</span>
+          <DescriptionIcon sx={{ fontSize: 16, mr: 0.5, verticalAlign: 'text-bottom' }} />
+          <span className="current-file">{currentFile}</span>
         </div>
       )}
       <div className="content">
-        {contentBlocks.map((block, index) => renderContentBlock(block, index))}
+        {mdxError && (
+          <div style={{ color: 'var(--vscode-errorForeground)', padding: '20px' }}>
+            Error compiling MDX: {mdxError}
+          </div>
+        )}
+        {isCompiling && <div style={{ padding: '20px' }}>Compiling MDX...</div>}
+        {!mdxError && !isCompiling && MdxModule && <MdxModule />}
       </div>
       <RunningTasksPanel
         runningTasks={runningTasks}
         onStop={handleStopTask}
         onFocus={handleFocusTerminal}
         onOpenDefinition={handleOpenDefinition}
+      />
+      <RecentTasksList 
+        tasks={recentlyUsedTasks}
+        onRun={handleRunTask}
+        onToggleStar={handleToggleStar}
+        starredTasks={starredTasks}
+      />
+      <StarredTasksList 
+        tasks={starredTasks}
+        onRun={handleRunTask}
+        onToggleStar={handleToggleStar}
       />
     </div>
   );

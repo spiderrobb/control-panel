@@ -1,19 +1,55 @@
 import React, { useState, useEffect } from 'react';
+import Button from '@mui/material/Button';
+import IconButton from '@mui/material/IconButton';
+import Tooltip from '@mui/material/Tooltip';
+import LinearProgress from '@mui/material/LinearProgress';
+import StopIcon from '@mui/icons-material/Stop';
+import BoltIcon from '@mui/icons-material/Bolt';
 
 function RunningTasksPanel({ runningTasks, onStop, onFocus, onOpenDefinition }) {
-  const runningTasksList = Object.entries(runningTasks).filter(([_, state]) => state.running);
+  const [showDebug, setShowDebug] = useState(false);
+  const runningTasksList = Object.entries(runningTasks).filter(([_, state]) => state.running || state.failed);
 
   if (runningTasksList.length === 0) {
     return null;
   }
 
+  // Filter to only show root-level tasks (those without a parent)
+  const rootTasks = runningTasksList.filter(([label, state]) => !state.parentTask);
+
   return (
     <div className="running-tasks-panel">
       <div className="panel-header">
         <h3>Running Tasks ({runningTasksList.length})</h3>
+        <Button
+          variant="outlined"
+          size="small"
+          onClick={() => setShowDebug(!showDebug)}
+          sx={{ ml: 'auto', minWidth: 'auto' }}
+        >
+          {showDebug ? 'Hide Debug' : 'Debug Info'}
+        </Button>
       </div>
+      {showDebug && (
+        <div style={{ padding: '10px', background: 'var(--vscode-editor-background)', borderBottom: '1px solid var(--vscode-panel-border)' }}>
+            <p style={{ margin: '0 0 5px 0', fontSize: '11px', opacity: 0.8 }}>Copy this JSON to share:</p>
+            <textarea 
+                readOnly
+                style={{ 
+                    width: '100%', 
+                    height: '100px', 
+                    background: 'var(--vscode-input-background)',
+                    color: 'var(--vscode-input-foreground)',
+                    fontFamily: 'monospace',
+                    fontSize: '10px'
+                }}
+                value={JSON.stringify(runningTasks, null, 2)}
+                onClick={(e) => e.target.select()}
+            />
+        </div>
+      )}
       <div className="panel-content">
-        {runningTasksList.map(([label, state]) => (
+        {rootTasks.map(([label, state]) => (
           <RunningTaskItem
             key={label}
             label={label}
@@ -22,6 +58,7 @@ function RunningTasksPanel({ runningTasks, onStop, onFocus, onOpenDefinition }) 
             onFocus={onFocus}
             onOpenDefinition={onOpenDefinition}
             allRunningTasks={runningTasks}
+            depth={0}
           />
         ))}
       </div>
@@ -29,7 +66,7 @@ function RunningTasksPanel({ runningTasks, onStop, onFocus, onOpenDefinition }) 
   );
 }
 
-function RunningTaskItem({ label, state, onStop, onFocus, onOpenDefinition, allRunningTasks }) {
+function RunningTaskItem({ label, state, onStop, onFocus, onOpenDefinition, allRunningTasks, depth = 0 }) {
   const [runtime, setRuntime] = useState(0);
   const [progress, setProgress] = useState(0);
 
@@ -37,6 +74,13 @@ function RunningTaskItem({ label, state, onStop, onFocus, onOpenDefinition, allR
   const avgDuration = state?.avgDuration || null;
   const isFirstRun = state?.isFirstRun || false;
   const subtasks = state?.subtasks || [];
+  const parentTaskLabel = state?.parentTask || null;
+  const isFailed = state?.failed || false;
+  const exitCode = state?.exitCode;
+  const failureReason = state?.failureReason;
+  const failedDependency = state?.failedDependency;
+  const canStop = state?.canStop !== false;
+  const canFocus = state?.canFocus !== false;
 
   useEffect(() => {
     if (!startTime) return;
@@ -68,6 +112,7 @@ function RunningTaskItem({ label, state, onStop, onFocus, onOpenDefinition, allR
   };
 
   const getBackgroundClass = () => {
+    if (isFailed) return 'error';
     if (runtime > 60000) return 'bg-solid';
     if (isFirstRun || !avgDuration) return 'bg-stripes';
     return 'bg-progress';
@@ -83,53 +128,114 @@ function RunningTaskItem({ label, state, onStop, onFocus, onOpenDefinition, allR
   };
 
   return (
-    <div className="running-task-item">
-      <div className={`task-pill ${getBackgroundClass()}`} style={getProgressStyle()}>
-        <span className="status-indicator running"></span>
-        <span 
-          className="task-label"
-          onDoubleClick={() => onOpenDefinition(label)}
-          title="Double-click to open task definition"
-        >{label}</span>
-        <span className="runtime">{formatRuntime(runtime)}</span>
-        {avgDuration && !isFirstRun && runtime <= 60000 && (
-          <span className="progress-text">{Math.floor(progress)}%</span>
+    <>
+      <div className="running-task-row" style={{ paddingLeft: `${16 + depth * 20}px` }}>
+        <div className="task-row-content">
+          <div className="task-info">
+            <span className={`status-dot ${isFailed ? 'failed' : ''}`}></span>
+            <div className="task-name-container">
+              {parentTaskLabel && (
+                <span className="parent-task-name">{parentTaskLabel}</span>
+              )}
+              <span 
+                className="task-name"
+                onDoubleClick={() => onOpenDefinition(label)}
+                title="Double-click to open task definition"
+              >{label}</span>
+            </div>
+            {isFailed ? (
+              <>
+                <span className="task-error-badge" title={failureReason}>
+                  Failed {exitCode !== undefined ? `(${exitCode})` : ''}
+                </span>
+                {failedDependency && (
+                  <span className="task-dependency-error" title={`Dependency "${failedDependency}" failed`}>
+                    ← {failedDependency}
+                  </span>
+                )}
+              </>
+            ) : (
+              <>
+                <span className="task-runtime">{formatRuntime(runtime)}</span>
+                {avgDuration && !isFirstRun && runtime <= 60000 && (
+                  <span className="task-progress-text">{Math.floor(progress)}%</span>
+                )}
+              </>
+            )}
+          </div>
+          <div className="task-actions">
+            <Tooltip title={canFocus ? "Focus terminal" : "Terminal not available"}>
+              <span>
+                <IconButton
+                  size="small"
+                  onClick={() => onFocus(label)}
+                  disabled={!canFocus || isFailed}
+                  sx={{ p: 0.5 }}
+                >
+                  <BoltIcon sx={{ fontSize: 16 }} />
+                </IconButton>
+              </span>
+            </Tooltip>
+            <Tooltip title={canStop ? "Stop task" : "Cannot stop task"}>
+              <span>
+                <IconButton
+                  size="small"
+                  onClick={() => onStop(label)}
+                  disabled={!canStop || isFailed}
+                  sx={{ p: 0.5 }}
+                >
+                  <StopIcon sx={{ fontSize: 16 }} />
+                </IconButton>
+              </span>
+            </Tooltip>
+          </div>
+        </div>
+        {!isFailed && avgDuration && !isFirstRun && runtime <= 60000 && (
+          <LinearProgress
+            variant="determinate"
+            value={progress}
+            sx={{ width: '100%', height: 4, mt: 0.5 }}
+          />
         )}
-        <button
-          className="task-button focus"
-          onClick={() => onFocus(label)}
-          title="Focus terminal"
-        >
-          ⚡
-        </button>
-        <button
-          className="task-button stop"
-          onClick={() => onStop(label)}
-          title="Stop task"
-        >
-          ■
-        </button>
+        {!isFailed && isFirstRun && (
+          <LinearProgress
+            sx={{ width: '100%', height: 4, mt: 0.5 }}
+          />
+        )}
       </div>
       
-      {subtasks.length > 0 && (
-        <div className="subtasks-container">
-          {subtasks.map((subtask, index) => {
-            const subtaskRunning = allRunningTasks?.[subtask]?.running;
-            return (
-              <div key={index} className="subtask-item">
-                <span className={`subtask-indicator ${subtaskRunning ? 'running' : 'waiting'}`}>
-                  {subtaskRunning ? '🟢' : '⏸'}
-                </span>
-                <span className="subtask-label">{subtask}</span>
-                {subtaskRunning && (
-                  <span className="subtask-status">running</span>
-                )}
+      {subtasks.map((subtask, index) => {
+        const subtaskState = allRunningTasks?.[subtask];
+        if (!subtaskState?.running) {
+          // Show waiting subtask
+          return (
+            <div key={index} className="running-task-row waiting" style={{ paddingLeft: `${16 + (depth + 1) * 20}px` }}>
+              <div className="task-info">
+                <span className="status-dot waiting"></span>
+                <div className="task-name-container">
+                  <span className="parent-task-name">{label}</span>
+                  <span className="task-name">{subtask}</span>
+                </div>
+                <span className="task-status-text">waiting</span>
               </div>
-            );
-          })}
-        </div>
-      )}
-    </div>
+            </div>
+          );
+        }
+        // Show running subtask recursively
+        return (
+          <RunningTaskItem
+            key={subtask}
+            label={subtask}
+            state={subtaskState}
+            onStop={onStop}
+            onFocus={onFocus}
+            onOpenDefinition={onOpenDefinition}
+            allRunningTasks={allRunningTasks}
+            depth={depth + 1}
+          />
+        );
+      })}
+    </>
   );
 }
 

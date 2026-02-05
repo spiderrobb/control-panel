@@ -1,46 +1,39 @@
-# Getting Started
+# Control Panel Development
 
-Welcome to the **Control Panel** - your interactive documentation and task management hub!
+Welcome to the **Control Panel** development environment. This panel assists in managing the extension's lifecycle, building, testing, and packaging.
 
-## What is Control Panel?
+## Getting Started
 
-Control Panel combines documentation with executable tasks, making it easy to:
+New to this extension? Check out the [Installation Guide](installation.mdx) for step-by-step instructions on how to install and run the extension in your local VS Code environment.
 
-- 📖 Browse documentation in MDX format
-- ▶️ Run tasks directly from documentation
-- 🔗 Navigate between related docs
-- ⚡ Monitor running tasks in real-time
+Below is a list of available tasks derived from the `package.json` scripts.
 
-## Quick Start
+## Build Tasks
 
-Check out our example tasks below:
+Use these tasks to compile the extension.
 
-<TaskList labelStartsWith="build:" />
+- **Build Production**: Creates a minimized production build.
+<TaskLink label="build" />
 
-## Navigation
+- **Compile Development**: compiles the extension in development mode.
+<TaskLink label="compile" />
 
-- [Task Progress Features](task-progress.mdx) - **NEW!** Smart progress tracking
-- [Development Guide](development.mdx)
-- [Deployment Guide](deployment.mdx)
+- **Watch Mode**: Automatically recompiles when files change.
+<TaskLink label="watch" />
 
-## Example Task Link
+## Quality & Testing
 
-Need to build the project? <TaskLink label="build:all" />
+Ensure code quality and run tests.
 
-## How It Works
+- **Lint**: Checks code for style and errors.
+<TaskLink label="lint" />
 
-The Control Panel extension watches the `.cpdox` directory for MDX files. When you click on links in the documentation, the panel updates to show the new content.
+- **Run Tests**: Executes the test suite.
+<TaskLink label="test" />
 
-### Interactive Task Components
+## Deployment
 
-- **TaskLink**: Click to run a single task with hover controls
-- **TaskList**: Display and filter tasks by label prefix
+Prepare the extension for release.
 
-### Task States
-
-When you run a task, you'll see:
-- 🟢 **Running** - Green indicator with runtime counter
-- ⚡ **Focus** - Button to jump to the task's terminal
-- ⏹️ **Stop** - Button to terminate the task
-
-Try it out with any of the tasks listed above!
+- **Package Extension**: Creates a `.vsix` file for distribution.
+<TaskLink label="package" />

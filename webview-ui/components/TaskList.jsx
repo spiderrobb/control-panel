@@ -1,7 +1,7 @@
 import React from 'react';
 import TaskLink from './TaskLink';
 
-function TaskList({ labelStartsWith, tasks, onRun, onStop, onFocus, onOpenDefinition, runningTasks }) {
+function TaskList({ labelStartsWith, tasks, onRun, onStop, onFocus, onOpenDefinition, runningTasks, starredTasks, onToggleStar }) {
   const filteredTasks = tasks.filter(task => 
     task.label.startsWith(labelStartsWith)
   );
@@ -27,6 +27,8 @@ function TaskList({ labelStartsWith, tasks, onRun, onStop, onFocus, onOpenDefini
               onOpenDefinition={onOpenDefinition}
               taskState={runningTasks[task.label]}
               allRunningTasks={runningTasks}
+              starredTasks={starredTasks}
+              onToggleStar={onToggleStar}
             />
             {task.detail && <span className="task-detail"> — {task.detail}</span>}
           </li>

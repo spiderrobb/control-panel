@@ -27,7 +27,10 @@ const extensionConfig = {
       }
     ]
   },
-  devtool: 'nosources-source-map'
+  devtool: process.env.NODE_ENV === 'production' ? false : 'nosources-source-map',
+  performance: {
+    hints: false
+  }
 };
 
 const webviewConfig = {
@@ -79,7 +82,10 @@ const webviewConfig = {
       filename: 'webview.html'
     })
   ],
-  devtool: 'nosources-source-map'
+  devtool: process.env.NODE_ENV === 'production' ? false : 'nosources-source-map',
+  performance: {
+    hints: false
+  }
 };
 
 module.exports = [extensionConfig, webviewConfig];
