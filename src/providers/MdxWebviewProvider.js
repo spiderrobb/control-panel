@@ -82,6 +82,23 @@ class MdxWebviewProvider {
     return this._context.globalState.get('starredTasks', []);
   }
 
+  // Failed tasks persistence
+  async getPersistedFailedTasks() {
+    return this._context.globalState.get('failedTasks', {});
+  }
+
+  async saveFailedTask(label, failureInfo) {
+    const failed = await this.getPersistedFailedTasks();
+    failed[label] = failureInfo;
+    await this._context.globalState.update('failedTasks', failed);
+  }
+
+  async clearFailedTask(label) {
+    const failed = await this.getPersistedFailedTasks();
+    delete failed[label];
+    await this._context.globalState.update('failedTasks', failed);
+  }
+
   async toggleStarTask(label) {
     let starred = await this.getStarredTasks();
     if (starred.includes(label)) {
@@ -140,10 +157,8 @@ class MdxWebviewProvider {
   async restoreRunningTasksState() {
     // Re-send taskStarted messages for tasks that are still running
     // This handles the case where the webview is hidden/shown or extension view is switched
-    if (this._runningTasks.size === 0) {
-      return;
-    }
-
+    
+    // Restore running tasks
     for (const [label, execution] of this._runningTasks.entries()) {
       const startTime = this._taskStartTimes.get(label);
       const state = this._taskStates.get(label);
@@ -175,6 +190,23 @@ class MdxWebviewProvider {
           isFirstRun: history.count === 0,
           subtasks,
           state: state || 'running'
+        });
+      }
+    }
+
+    // Restore persisted failed tasks
+    const persistedFailures = await this.getPersistedFailedTasks();
+    for (const [label, failureInfo] of Object.entries(persistedFailures)) {
+      // Only restore if not currently running
+      if (!this._runningTasks.has(label)) {
+        this._view?.webview.postMessage({
+          type: 'taskFailed',
+          taskLabel: label,
+          exitCode: failureInfo.exitCode,
+          reason: failureInfo.reason,
+          duration: failureInfo.duration || 0,
+          subtasks: failureInfo.subtasks || [],
+          failedDependency: failureInfo.failedDependency
         });
       }
     }
@@ -231,6 +263,9 @@ class MdxWebviewProvider {
             type: 'updateStarred',
             tasks: starred
           });
+          break;
+        case 'dismissTask':
+          await this.clearFailedTask(message.label);
           break;
       }
     });
@@ -391,6 +426,9 @@ class MdxWebviewProvider {
     const task = tasks.find(t => t.name === label);
 
     if (task) {
+      // Clear any persisted failure when re-running
+      await this.clearFailedTask(label);
+      
       const startTime = Date.now();
       
       // Check if task has dependencies
@@ -449,32 +487,120 @@ class MdxWebviewProvider {
       return;
     }
     
+    this._taskStates.set(label, 'stopping');
+    let stopped = false;
+    
+    // Method 1: Try VS Code API terminate() - the standard way
     try {
-      this._taskStates.set(label, 'stopping');
       execution.terminate();
-      this._runningTasks.delete(label);
-      this._taskStates.set(label, 'stopped');
-      
-      this._view?.webview.postMessage({
-        type: 'taskStateChanged',
-        taskLabel: label,
-        state: 'stopped',
-        canStop: false,
-        canFocus: false
-      });
+      console.log(`[ControlPanel] Method 1 (API terminate): Sent terminate signal to task "${label}"`);
+      stopped = true;
     } catch (error) {
-      console.warn(`Failed to stop task ${label}:`, error);
-      // Still remove from UI even if terminate failed
-      this._runningTasks.delete(label);
-      this._taskStates.set(label, 'stopped');
-      
-      this._view?.webview.postMessage({
-        type: 'taskEnded',
-        taskLabel: label,
-        exitCode: 0,
-        duration: 0,
-        subtasks: []
-      });
+      console.warn(`[ControlPanel] Method 1 failed for task ${label}:`, error);
+    }
+    
+    // Method 2: Try to find and dispose the terminal
+    if (!stopped) {
+      try {
+        const terminals = vscode.window.terminals;
+        const terminal = terminals.find(t => 
+          t.name.includes(label) || 
+          t.name === 'Task - ' + label ||
+          t.name.startsWith('Task - ')
+        );
+        
+        if (terminal) {
+          terminal.dispose();
+          console.log(`[ControlPanel] Method 2 (terminal dispose): Disposed terminal for task "${label}"`);
+          stopped = true;
+        }
+      } catch (error) {
+        console.warn(`[ControlPanel] Method 2 failed for task ${label}:`, error);
+      }
+    }
+    
+    // Method 3: Try to kill by process via terminal
+    if (!stopped) {
+      try {
+        const terminals = vscode.window.terminals;
+        const terminal = terminals.find(t => 
+          t.name.includes(label) || 
+          t.name === 'Task - ' + label ||
+          t.name.startsWith('Task - ')
+        );
+        
+        if (terminal) {
+          // Send Ctrl+C signal to terminal
+          terminal.sendText('\x03');
+          console.log(`[ControlPanel] Method 3 (Ctrl+C): Sent SIGINT to terminal for task "${label}"`);
+          
+          // Wait briefly then kill if still alive
+          setTimeout(() => {
+            if (vscode.window.terminals.includes(terminal)) {
+              terminal.dispose();
+              console.log(`[ControlPanel] Method 3 (delayed dispose): Force disposed terminal for task "${label}"`);
+            }
+          }, 500);
+          
+          stopped = true;
+        }
+      } catch (error) {
+        console.warn(`[ControlPanel] Method 3 failed for task ${label}:`, error);
+      }
+    }
+    
+    // Method 4: Force kill all terminals with similar name (nuclear option)
+    if (!stopped) {
+      try {
+        const terminals = vscode.window.terminals;
+        let killedCount = 0;
+        
+        terminals.forEach(terminal => {
+          if (terminal.name.toLowerCase().includes(label.toLowerCase()) ||
+              terminal.name.startsWith('Task - ')) {
+            try {
+              terminal.dispose();
+              killedCount++;
+            } catch (e) {
+              // Ignore individual failures
+            }
+          }
+        });
+        
+        if (killedCount > 0) {
+          console.log(`[ControlPanel] Method 4 (force all): Disposed ${killedCount} terminal(s) for task "${label}"`);
+          stopped = true;
+        }
+      } catch (error) {
+        console.warn(`[ControlPanel] Method 4 failed for task ${label}:`, error);
+      }
+    }
+    
+    // Clean up tracking regardless of stop success
+    this._runningTasks.delete(label);
+    this._taskStates.set(label, 'stopped');
+    
+    this._view?.webview.postMessage({
+      type: 'taskStateChanged',
+      taskLabel: label,
+      state: 'stopped',
+      canStop: false,
+      canFocus: false
+    });
+    
+    // Send completion message
+    this._view?.webview.postMessage({
+      type: 'taskEnded',
+      taskLabel: label,
+      exitCode: stopped ? 130 : 0, // 130 = terminated by SIGINT
+      duration: 0,
+      subtasks: []
+    });
+    
+    if (stopped) {
+      console.log(`[ControlPanel] Successfully stopped task "${label}"`);
+    } else {
+      console.warn(`[ControlPanel] All stop methods failed for task "${label}", but cleaned up tracking`);
     }
   }
 
@@ -551,6 +677,8 @@ class MdxWebviewProvider {
     this._runningTasks.set(label, event.execution);
     // Clear any previous failure state
     this._taskFailures.delete(label);
+    // Clear persisted failure
+    this.clearFailedTask(label);
     
     // Check if this task is a subtask of any running task
     this._taskHierarchy.forEach((subtasks, parentLabel) => {
@@ -587,6 +715,9 @@ class MdxWebviewProvider {
     const exitCode = event.exitCode !== undefined ? event.exitCode : 0;
     const failed = exitCode !== 0;
     
+    // Get subtasks before cleaning up
+    const subtasks = this.getTaskHierarchy(label);
+    
     // Update task history with duration (only if successful)
     if (!failed) {
       this.updateTaskHistory(label, duration);
@@ -597,11 +728,16 @@ class MdxWebviewProvider {
     
     // Track failure if task failed
     if (failed) {
-      this._taskFailures.set(label, {
+      const failureInfo = {
         exitCode,
         reason: 'Task exited with non-zero code',
-        timestamp: Date.now()
-      });
+        timestamp: Date.now(),
+        duration,
+        subtasks
+      };
+      this._taskFailures.set(label, failureInfo);
+      // Persist failure so it survives view changes
+      this.saveFailedTask(label, failureInfo);
     }
     
     // Check if this task is a subtask of any running task
@@ -626,9 +762,6 @@ class MdxWebviewProvider {
         this.propagateTaskFailure(parentLabel, label, exitCode);
       });
     }
-    
-    // Get subtasks before cleaning up
-    const subtasks = this.getTaskHierarchy(label);
     
     // Clean up
     this._runningTasks.delete(label);
@@ -665,12 +798,17 @@ class MdxWebviewProvider {
 
     // Set failure state for parent
     this._taskStates.set(parentLabel, 'failed');
-    this._taskFailures.set(parentLabel, {
+    const failureInfo = {
       exitCode: -1, // Special code for dependency failure
       reason: `Dependency failed: ${failedSubtask} (exit code ${exitCode})`,
       failedDependency: failedSubtask,
-      timestamp: Date.now()
-    });
+      timestamp: Date.now(),
+      duration,
+      subtasks
+    };
+    this._taskFailures.set(parentLabel, failureInfo);
+    // Persist failure so it survives view changes
+    this.saveFailedTask(parentLabel, failureInfo);
 
     // Terminate the parent task
     try {

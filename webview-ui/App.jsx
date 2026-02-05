@@ -96,14 +96,7 @@ function App() {
                 subtasks: message.subtasks || []
               };
             }
-            // Keep failed tasks visible longer (5 seconds)
-            setTimeout(() => {
-              setRunningTasks(current => {
-                const copy = { ...current };
-                delete copy[message.taskLabel];
-                return copy;
-              });
-            }, 5000);
+            // Keep failed tasks visible until dismissed or re-run
             return updated;
           });
           break;
@@ -205,6 +198,16 @@ function App() {
 
   const handleToggleStar = (label) => {
     vscode.postMessage({ type: 'toggleStar', label });
+  };
+
+  const handleDismissTask = (label) => {
+    setRunningTasks(prev => {
+      const updated = { ...prev };
+      delete updated[label];
+      return updated;
+    });
+    // Notify extension to clear persisted failure
+    vscode.postMessage({ type: 'dismissTask', label });
   };
 
   // State for compiled MDX component
@@ -326,6 +329,7 @@ function App() {
         onStop={handleStopTask}
         onFocus={handleFocusTerminal}
         onOpenDefinition={handleOpenDefinition}
+        onDismiss={handleDismissTask}
       />
       <RecentTasksList 
         tasks={recentlyUsedTasks}

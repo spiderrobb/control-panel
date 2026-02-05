@@ -5,8 +5,9 @@ import Tooltip from '@mui/material/Tooltip';
 import LinearProgress from '@mui/material/LinearProgress';
 import StopIcon from '@mui/icons-material/Stop';
 import BoltIcon from '@mui/icons-material/Bolt';
+import CloseIcon from '@mui/icons-material/Close';
 
-function RunningTasksPanel({ runningTasks, onStop, onFocus, onOpenDefinition }) {
+function RunningTasksPanel({ runningTasks, onStop, onFocus, onOpenDefinition, onDismiss }) {
   const [showDebug, setShowDebug] = useState(false);
   const runningTasksList = Object.entries(runningTasks).filter(([_, state]) => state.running || state.failed);
 
@@ -57,6 +58,7 @@ function RunningTasksPanel({ runningTasks, onStop, onFocus, onOpenDefinition }) 
             onStop={onStop}
             onFocus={onFocus}
             onOpenDefinition={onOpenDefinition}
+            onDismiss={onDismiss}
             allRunningTasks={runningTasks}
             depth={0}
           />
@@ -66,7 +68,7 @@ function RunningTasksPanel({ runningTasks, onStop, onFocus, onOpenDefinition }) 
   );
 }
 
-function RunningTaskItem({ label, state, onStop, onFocus, onOpenDefinition, allRunningTasks, depth = 0 }) {
+function RunningTaskItem({ label, state, onStop, onFocus, onOpenDefinition, onDismiss, allRunningTasks, depth = 0 }) {
   const [runtime, setRuntime] = useState(0);
   const [progress, setProgress] = useState(0);
 
@@ -176,18 +178,32 @@ function RunningTaskItem({ label, state, onStop, onFocus, onOpenDefinition, allR
                 </IconButton>
               </span>
             </Tooltip>
-            <Tooltip title={canStop ? "Stop task" : "Cannot stop task"}>
-              <span>
-                <IconButton
-                  size="small"
-                  onClick={() => onStop(label)}
-                  disabled={!canStop || isFailed}
-                  sx={{ p: 0.5 }}
-                >
-                  <StopIcon sx={{ fontSize: 16 }} />
-                </IconButton>
-              </span>
-            </Tooltip>
+            {isFailed ? (
+              <Tooltip title="Dismiss failed task">
+                <span>
+                  <IconButton
+                    size="small"
+                    onClick={() => onDismiss(label)}
+                    sx={{ p: 0.5 }}
+                  >
+                    <CloseIcon sx={{ fontSize: 16 }} />
+                  </IconButton>
+                </span>
+              </Tooltip>
+            ) : (
+              <Tooltip title={canStop ? "Stop task" : "Cannot stop task"}>
+                <span>
+                  <IconButton
+                    size="small"
+                    onClick={() => onStop(label)}
+                    disabled={!canStop || isFailed}
+                    sx={{ p: 0.5 }}
+                  >
+                    <StopIcon sx={{ fontSize: 16 }} />
+                  </IconButton>
+                </span>
+              </Tooltip>
+            )}
           </div>
         </div>
         {!isFailed && avgDuration && !isFirstRun && runtime <= 60000 && (
@@ -230,6 +246,7 @@ function RunningTaskItem({ label, state, onStop, onFocus, onOpenDefinition, allR
             onStop={onStop}
             onFocus={onFocus}
             onOpenDefinition={onOpenDefinition}
+            onDismiss={onDismiss}
             allRunningTasks={allRunningTasks}
             depth={depth + 1}
           />
