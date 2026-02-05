@@ -3,8 +3,9 @@ const path = require('path');
 const fs = require('fs');
 
 class MdxWebviewProvider {
-  constructor(context) {
+  constructor(context, logger) {
     this._context = context;
+    this._logger = logger;
     this._view = undefined;
     this._runningTasks = new Map(); // Map<label, execution>
     this._taskHierarchy = new Map(); // Map<parentLabel, Set<childLabel>>
@@ -312,6 +313,15 @@ class MdxWebviewProvider {
         case 'dismissTask':
           await this.clearFailedTask(message.label);
           break;
+        case 'showLogs':
+          this._logger.show();
+          break;
+        case 'getLogBuffer':
+          this._view?.webview.postMessage({
+            type: 'logBuffer',
+            entries: this._logger.getBuffer()
+          });
+          break;
       }
     });
   }
@@ -386,6 +396,7 @@ class MdxWebviewProvider {
         file: fileName
       });
     } catch (error) {
+      this._logger.error(`Error loading MDX file "${fileName}":`, error);
       vscode.window.showErrorMessage(`Error loading MDX: ${error.message}`);
     }
   }
@@ -520,7 +531,7 @@ class MdxWebviewProvider {
             }
           }
         } catch (e) {
-          console.warn('Failed to parse tasks.json dependencies:', e);
+          this._logger.warn('Failed to parse tasks.json dependencies:', e);
         }
       }
     }
@@ -609,7 +620,7 @@ class MdxWebviewProvider {
     // Recursively stop all child tasks in parallel (faster termination)
     const children = this.getTaskHierarchy(label);
     if (children && children.length > 0) {
-      console.log(`[ControlPanel] Stopping ${children.length} child task(s) of "${label}"...`);
+      this._logger.info(`Stopping ${children.length} child task(s) of "${label}"...`);
       try {
         await Promise.all(children.map(childLabel => this.stopTask(childLabel)));
         
@@ -618,7 +629,7 @@ class MdxWebviewProvider {
           this.removeSubTask(label, childLabel);
         }
       } catch (error) {
-        console.warn(`[ControlPanel] Error stopping children of task ${label}:`, error);
+        this._logger.warn(`Error stopping children of task ${label}:`, error);
       }
     }
     
@@ -627,10 +638,10 @@ class MdxWebviewProvider {
     // Method 1: Try VS Code API terminate() - the standard way
     try {
       execution.terminate();
-      console.log(`[ControlPanel] Method 1 (API terminate): Sent terminate signal to task "${label}"`);
+      this._logger.info(`Method 1 (API terminate): Sent terminate signal to task "${label}"`);
       stopped = true;
     } catch (error) {
-      console.warn(`[ControlPanel] Method 1 failed for task ${label}:`, error);
+      this._logger.warn(`Method 1 failed for task ${label}:`, error);
     }
     
     // Method 2: Try to find and dispose the terminal
@@ -645,11 +656,11 @@ class MdxWebviewProvider {
         
         if (terminal) {
           terminal.dispose();
-          console.log(`[ControlPanel] Method 2 (terminal dispose): Disposed terminal for task "${label}"`);
+          this._logger.info(`Method 2 (terminal dispose): Disposed terminal for task "${label}"`);
           stopped = true;
         }
       } catch (error) {
-        console.warn(`[ControlPanel] Method 2 failed for task ${label}:`, error);
+        this._logger.warn(`Method 2 failed for task ${label}:`, error);
       }
     }
     
@@ -666,20 +677,20 @@ class MdxWebviewProvider {
         if (terminal) {
           // Send Ctrl+C signal to terminal
           terminal.sendText('\x03');
-          console.log(`[ControlPanel] Method 3 (Ctrl+C): Sent SIGINT to terminal for task "${label}"`);
+          this._logger.info(`Method 3 (Ctrl+C): Sent SIGINT to terminal for task "${label}"`);
           
           // Wait briefly then kill if still alive
           setTimeout(() => {
             if (vscode.window.terminals.includes(terminal)) {
               terminal.dispose();
-              console.log(`[ControlPanel] Method 3 (delayed dispose): Force disposed terminal for task "${label}"`);
+              this._logger.info(`Method 3 (delayed dispose): Force disposed terminal for task "${label}"`);
             }
           }, 500);
           
           stopped = true;
         }
       } catch (error) {
-        console.warn(`[ControlPanel] Method 3 failed for task ${label}:`, error);
+        this._logger.warn(`Method 3 failed for task ${label}:`, error);
       }
     }
     
@@ -702,11 +713,11 @@ class MdxWebviewProvider {
         });
         
         if (killedCount > 0) {
-          console.log(`[ControlPanel] Method 4 (force all): Disposed ${killedCount} terminal(s) for task "${label}"`);
+          this._logger.info(`Method 4 (force all): Disposed ${killedCount} terminal(s) for task "${label}"`);
           stopped = true;
         }
       } catch (error) {
-        console.warn(`[ControlPanel] Method 4 failed for task ${label}:`, error);
+        this._logger.warn(`Method 4 failed for task ${label}:`, error);
       }
     }
     
@@ -733,9 +744,9 @@ class MdxWebviewProvider {
     });
     
     if (stopped) {
-      console.log(`[ControlPanel] Successfully stopped task "${label}"`);
+      this._logger.info(`Successfully stopped task "${label}"`);
     } else {
-      console.warn(`[ControlPanel] All stop methods failed for task "${label}", but cleaned up tracking`);
+      this._logger.warn(`All stop methods failed for task "${label}", but cleaned up tracking`);
     }
   }
 
@@ -799,6 +810,7 @@ class MdxWebviewProvider {
         editor.revealRange(new vscode.Range(position, position), vscode.TextEditorRevealType.InCenter);
       }
     } catch (error) {
+      this._logger.error(`Error opening task definition for "${label}":`, error);
       vscode.window.showErrorMessage(`Error opening task definition: ${error.message}`);
     }
   }
@@ -806,6 +818,7 @@ class MdxWebviewProvider {
   handleTaskStarted(event) {
     const label = event.execution.task.name;
     const startTime = Date.now();
+    this._logger.info(`Task started: "${label}"`);
     
     this._taskStartTimes.set(label, startTime);
     this._taskStates.set(label, 'running');
@@ -849,6 +862,12 @@ class MdxWebviewProvider {
     const duration = startTime ? Date.now() - startTime : 0;
     const exitCode = event.exitCode !== undefined ? event.exitCode : 0;
     const failed = exitCode !== 0;
+
+    if (failed) {
+      this._logger.error(`Task "${label}" failed with exit code ${exitCode} after ${duration}ms`);
+    } else {
+      this._logger.info(`Task "${label}" completed successfully in ${duration}ms`);
+    }
     
     // Get subtasks before cleaning up
     const subtasks = this.getTaskHierarchy(label);
@@ -931,6 +950,11 @@ class MdxWebviewProvider {
       return; // Parent already completed or doesn't exist
     }
 
+    // Compute duration and subtasks BEFORE using them in failureInfo
+    const startTime = this._taskStartTimes.get(parentLabel);
+    const duration = startTime ? Date.now() - startTime : 0;
+    const subtasks = this.getTaskHierarchy(parentLabel);
+
     // Set failure state for parent
     this._taskStates.set(parentLabel, 'failed');
     const failureInfo = {
@@ -949,12 +973,10 @@ class MdxWebviewProvider {
     try {
       parentExecution.terminate();
     } catch (error) {
-      console.warn(`Failed to terminate parent task ${parentLabel}:`, error);
+      this._logger.warn(`Failed to terminate parent task ${parentLabel}:`, error);
     }
 
-    const startTime = this._taskStartTimes.get(parentLabel);
-    const duration = startTime ? Date.now() - startTime : 0;
-    const subtasks = this.getTaskHierarchy(parentLabel);
+    this._logger.error(`Task "${parentLabel}" failed: dependency "${failedSubtask}" exited with code ${exitCode}`);
 
     // Notify webview
     this._view?.webview.postMessage({

@@ -2,15 +2,18 @@ const vscode = require('vscode');
 const path = require('path');
 const fs = require('fs');
 const MdxWebviewProvider = require('./src/providers/MdxWebviewProvider');
+const Logger = require('./src/Logger');
 
 /**
  * @param {vscode.ExtensionContext} context
  */
 function activate(context) {
-	console.log('Control Panel extension is now active!');
+	const logger = new Logger('Control Panel');
+	logger.info('Control Panel extension is now active!');
+	context.subscriptions.push(logger);
 
 	// Register the webview provider
-	const provider = new MdxWebviewProvider(context);
+	const provider = new MdxWebviewProvider(context, logger);
 	
 	context.subscriptions.push(
 		vscode.window.registerWebviewViewProvider('controlpanel.mdxView', provider)
@@ -211,8 +214,3 @@ module.exports = {
 	activate,
 	deactivate
 };
-
-module.exports = {
-	activate,
-	deactivate
-}

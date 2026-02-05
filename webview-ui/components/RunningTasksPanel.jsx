@@ -7,9 +7,18 @@ import StopIcon from '@mui/icons-material/Stop';
 import BoltIcon from '@mui/icons-material/Bolt';
 import CloseIcon from '@mui/icons-material/Close';
 
-function RunningTasksPanel({ runningTasks, onStop, onFocus, onOpenDefinition, onDismiss }) {
+function RunningTasksPanel({ runningTasks, onStop, onFocus, onOpenDefinition, onDismiss, onShowLogs, onRequestLogBuffer, logBuffer }) {
   const [showDebug, setShowDebug] = useState(false);
   const runningTasksList = Object.entries(runningTasks).filter(([_, state]) => state.running || state.failed);
+
+  // Request fresh log buffer whenever debug panel is opened
+  useEffect(() => {
+    if (showDebug && onRequestLogBuffer) {
+      onRequestLogBuffer();
+      const interval = setInterval(onRequestLogBuffer, 2000);
+      return () => clearInterval(interval);
+    }
+  }, [showDebug]);
 
   if (runningTasksList.length === 0) {
     return null;
@@ -18,27 +27,47 @@ function RunningTasksPanel({ runningTasks, onStop, onFocus, onOpenDefinition, on
   // Filter to only show root-level tasks (those without a parent)
   const rootTasks = runningTasksList.filter(([label, state]) => !state.parentTask);
 
+  const getLevelColor = (level) => {
+    switch (level) {
+      case 'ERROR': return 'var(--vscode-errorForeground, #f44747)';
+      case 'WARN':  return 'var(--vscode-editorWarning-foreground, #cca700)';
+      case 'INFO':  return 'var(--vscode-foreground, #ccc)';
+      case 'DEBUG': return 'var(--vscode-descriptionForeground, #888)';
+      default:      return 'var(--vscode-foreground, #ccc)';
+    }
+  };
+
   return (
     <div className="running-tasks-panel">
       <div className="panel-header">
         <h3>Running Tasks ({runningTasksList.length})</h3>
-        <Button
-          variant="outlined"
-          size="small"
-          onClick={() => setShowDebug(!showDebug)}
-          sx={{ ml: 'auto', minWidth: 'auto' }}
-        >
-          {showDebug ? 'Hide Debug' : 'Debug Info'}
-        </Button>
+        <div style={{ display: 'flex', gap: '4px', marginLeft: 'auto' }}>
+          <Button
+            variant="outlined"
+            size="small"
+            onClick={onShowLogs}
+            sx={{ minWidth: 'auto' }}
+          >
+            Show Logs
+          </Button>
+          <Button
+            variant="outlined"
+            size="small"
+            onClick={() => setShowDebug(!showDebug)}
+            sx={{ minWidth: 'auto' }}
+          >
+            {showDebug ? 'Hide Debug' : 'Debug Info'}
+          </Button>
+        </div>
       </div>
       {showDebug && (
         <div style={{ padding: '10px', background: 'var(--vscode-editor-background)', borderBottom: '1px solid var(--vscode-panel-border)' }}>
-            <p style={{ margin: '0 0 5px 0', fontSize: '11px', opacity: 0.8 }}>Copy this JSON to share:</p>
+            <p style={{ margin: '0 0 5px 0', fontSize: '11px', opacity: 0.8 }}>Task State (copy this JSON to share):</p>
             <textarea 
                 readOnly
                 style={{ 
                     width: '100%', 
-                    height: '100px', 
+                    height: '80px', 
                     background: 'var(--vscode-input-background)',
                     color: 'var(--vscode-input-foreground)',
                     fontFamily: 'monospace',
@@ -47,6 +76,41 @@ function RunningTasksPanel({ runningTasks, onStop, onFocus, onOpenDefinition, on
                 value={JSON.stringify(runningTasks, null, 2)}
                 onClick={(e) => e.target.select()}
             />
+            <p style={{ margin: '10px 0 5px 0', fontSize: '11px', opacity: 0.8 }}>
+              Recent Logs ({logBuffer?.length || 0} entries):
+            </p>
+            <div style={{
+              maxHeight: '150px',
+              overflowY: 'auto',
+              background: 'var(--vscode-input-background)',
+              border: '1px solid var(--vscode-panel-border)',
+              borderRadius: '3px',
+              padding: '4px',
+              fontFamily: 'monospace',
+              fontSize: '10px',
+              lineHeight: '1.5'
+            }}>
+              {(!logBuffer || logBuffer.length === 0) ? (
+                <span style={{ opacity: 0.5 }}>No log entries yet</span>
+              ) : (
+                [...logBuffer].reverse().map((entry, i) => (
+                  <div key={i} style={{ 
+                    color: getLevelColor(entry.level),
+                    whiteSpace: 'pre-wrap',
+                    wordBreak: 'break-all',
+                    borderBottom: '1px solid var(--vscode-panel-border)',
+                    padding: '2px 0'
+                  }}>
+                    <span style={{ opacity: 0.6 }}>{entry.timestamp?.split(' ')[1] || ''}</span>
+                    {' '}
+                    <span style={{ fontWeight: entry.level === 'ERROR' ? 'bold' : 'normal' }}>
+                      [{entry.level}]
+                    </span>
+                    {' '}{entry.message}
+                  </div>
+                ))
+              )}
+            </div>
         </div>
       )}
       <div className="panel-content">

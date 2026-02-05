@@ -29,6 +29,7 @@ function App() {
   const [currentFile, setCurrentFile] = useState('');
   const [tasks, setTasks] = useState([]);
   const [runningTasks, setRunningTasks] = useState({});
+  const [logBuffer, setLogBuffer] = useState([]);
   const [recentlyUsedTasks, setRecentlyUsedTasks] = useState([]);
   const [starredTasks, setStarredTasks] = useState([]);
   const [navigationHistory, setNavigationHistory] = useState([]);
@@ -176,6 +177,9 @@ function App() {
           setNavigationHistory(message.history);
           setNavigationIndex(message.index);
           break;
+        case 'logBuffer':
+          setLogBuffer(message.entries || []);
+          break;
         case 'error':
           console.warn(message.message);
           break;
@@ -236,6 +240,14 @@ function App() {
     });
     // Notify extension to clear persisted failure
     vscode.postMessage({ type: 'dismissTask', label });
+  };
+
+  const handleShowLogs = () => {
+    vscode.postMessage({ type: 'showLogs' });
+  };
+
+  const handleRequestLogBuffer = () => {
+    vscode.postMessage({ type: 'getLogBuffer' });
   };
 
   // State for compiled MDX component
@@ -458,6 +470,9 @@ function App() {
         onFocus={handleFocusTerminal}
         onOpenDefinition={handleOpenDefinition}
         onDismiss={handleDismissTask}
+        onShowLogs={handleShowLogs}
+        onRequestLogBuffer={handleRequestLogBuffer}
+        logBuffer={logBuffer}
       />
       <RecentTasksList 
         tasks={recentlyUsedTasks}
