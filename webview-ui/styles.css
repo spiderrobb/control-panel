@@ -1,0 +1,429 @@
+body {
+  margin: 0;
+  padding: 0;
+  font-family: var(--vscode-font-family);
+  font-size: var(--vscode-font-size);
+  color: var(--vscode-foreground);
+  background-color: var(--vscode-editor-background);
+}
+
+#root {
+  height: 100vh;
+  overflow: auto;
+}
+
+.app {
+  padding: 16px;
+  max-width: 100%;
+}
+
+.loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100vh;
+  color: var(--vscode-descriptionForeground);
+}
+
+.breadcrumb {
+  margin-bottom: 16px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--vscode-panel-border);
+  font-size: 12px;
+  color: var(--vscode-descriptionForeground);
+}
+
+.current-file {
+  font-weight: 600;
+}
+
+.content {
+  line-height: 1.6;
+}
+
+/* Markdown Styles */
+.content h1 {
+  font-size: 2em;
+  font-weight: 600;
+  margin-top: 24px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--vscode-panel-border);
+  padding-bottom: 8px;
+}
+
+.content h2 {
+  font-size: 1.5em;
+  font-weight: 600;
+  margin-top: 24px;
+  margin-bottom: 12px;
+}
+
+.content h3 {
+  font-size: 1.25em;
+  font-weight: 600;
+  margin-top: 16px;
+  margin-bottom: 8px;
+}
+
+.content p {
+  margin: 12px 0;
+}
+
+.content ul, .content ol {
+  margin: 12px 0;
+  padding-left: 24px;
+}
+
+.content li {
+  margin: 4px 0;
+}
+
+.content a {
+  color: var(--vscode-textLink-foreground);
+  text-decoration: none;
+}
+
+.content a:hover {
+  text-decoration: underline;
+}
+
+.content code {
+  background-color: var(--vscode-textCodeBlock-background);
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-family: var(--vscode-editor-font-family);
+  font-size: 0.9em;
+}
+
+.content pre {
+  background-color: var(--vscode-textCodeBlock-background);
+  padding: 12px;
+  border-radius: 4px;
+  overflow-x: auto;
+  margin: 12px 0;
+}
+
+.content pre code {
+  background-color: transparent;
+  padding: 0;
+}
+
+.content blockquote {
+  border-left: 4px solid var(--vscode-textBlockQuote-border);
+  padding-left: 16px;
+  margin: 12px 0;
+  color: var(--vscode-textBlockQuote-foreground);
+  background-color: var(--vscode-textBlockQuote-background);
+  padding: 8px 16px;
+}
+
+/* Task Link Styles */
+.task-link {
+  display: inline-flex;
+  align-items: center;
+  margin: 2px 0;
+  font-family: var(--vscode-editor-font-family);
+}
+
+.task-label-simple {
+  color: var(--vscode-textLink-foreground);
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+}
+
+.task-expanded {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border: 1px solid var(--vscode-button-border);
+  border-radius: 4px;
+  background-color: var(--vscode-button-secondaryBackground);
+  transition: all 0.2s ease;
+}
+
+.task-expanded .task-label {
+  cursor: pointer;
+  user-select: none;
+}
+
+.task-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-radius: 16px;
+  background-color: var(--vscode-button-background);
+  color: var(--vscode-button-foreground);
+}
+
+.task-pill .task-label {
+  font-weight: 600;
+  cursor: pointer;
+  user-select: none;
+}
+
+.status-indicator {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.status-indicator.idle {
+  background-color: var(--vscode-charts-blue);
+}
+
+.status-indicator.running {
+  background-color: var(--vscode-charts-green);
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+.task-button {
+  background: none;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  padding: 2px 6px;
+  font-size: 14px;
+  opacity: 0.8;
+  transition: opacity 0.2s;
+}
+
+.task-button:hover {
+  opacity: 1;
+  background-color: rgba(255, 255, 255, 0.1);
+  border-radius: 3px;
+}
+
+.task-button.run {
+  color: var(--vscode-charts-green);
+}
+
+.task-button.stop {
+  color: var(--vscode-charts-red);
+}
+
+.task-button.focus {
+  color: var(--vscode-charts-yellow);
+}
+
+.runtime {
+  font-size: 0.85em;
+  opacity: 0.8;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Task List Styles */
+.task-list {
+  margin: 16px 0;
+  padding: 12px;
+  border: 1px solid var(--vscode-panel-border);
+  border-radius: 4px;
+  background-color: var(--vscode-editor-background);
+}
+
+.task-list ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.task-list li {
+  padding: 6px 0;
+  display: flex;
+  align-items: center;
+}
+
+.task-list.empty {
+  text-align: center;
+  color: var(--vscode-descriptionForeground);
+  font-style: italic;
+}
+
+.task-detail {
+  margin-left: 8px;
+  color: var(--vscode-descriptionForeground);
+  font-size: 0.9em;
+}
+
+/* Hierarchical Task Styles */
+.task-link.with-subtasks {
+  display: flex;
+  flex-direction: column;
+  margin: 4px 0;
+}
+
+.subtasks-container {
+  margin-left: 24px;
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.subtask-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  font-size: 0.9em;
+  color: var(--vscode-descriptionForeground);
+  background-color: rgba(255, 255, 255, 0.03);
+  border-radius: 4px;
+}
+
+.subtask-indicator {
+  color: var(--vscode-charts-blue);
+  font-weight: bold;
+}
+
+.subtask-indicator.running {
+  color: var(--vscode-charts-green);
+}
+
+.subtask-indicator.waiting {
+  color: var(--vscode-charts-orange);
+  opacity: 0.7;
+}
+
+.subtask-label {
+  flex: 1;
+  font-family: var(--vscode-editor-font-family);
+}
+
+.subtask-status {
+  font-size: 0.75em;
+  color: var(--vscode-charts-green);
+  font-style: italic;
+  margin-left: 8px;
+}
+
+/* Progress Background Styles */
+.task-pill.bg-stripes {
+  position: relative;
+  overflow: hidden;
+}
+
+.task-pill.bg-stripes::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-image: repeating-linear-gradient(
+    45deg,
+    rgba(0, 0, 0, 0.17) 0px,
+    rgba(0, 0, 0, 0.17) 10px,
+    transparent 10px,
+    transparent 20px
+  );
+  animation: stripes-move 1s linear infinite;
+  pointer-events: none;
+}
+
+@keyframes stripes-move {
+  0% {
+    background-position: 0 0;
+  }
+  100% {
+    background-position: 28px 0;
+  }
+}
+
+.task-pill.bg-progress {
+  position: relative;
+  overflow: hidden;
+  background: linear-gradient(
+    to right,
+    var(--vscode-charts-blue) 0%,
+    var(--vscode-charts-blue) var(--progress, 0%),
+    var(--vscode-button-background) var(--progress, 0%),
+    var(--vscode-button-background) 100%
+  );
+  transition: background 0.3s ease;
+}
+
+.task-pill.bg-solid {
+  background-color: var(--vscode-charts-blue);
+}
+
+.progress-text {
+  font-size: 0.75em;
+  opacity: 0.7;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Running Tasks Panel */
+.running-tasks-panel {
+  position: sticky;
+  bottom: 0;
+  margin-top: 24px;
+  padding: 16px;
+  border-top: 2px solid var(--vscode-panel-border);
+  background-color: var(--vscode-sideBar-background);
+  box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.2);
+}
+
+.running-tasks-panel .panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.running-tasks-panel h3 {
+  margin: 0;
+  font-size: 1em;
+  font-weight: 600;
+  color: var(--vscode-foreground);
+}
+
+.running-tasks-panel .panel-content {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.running-task-item {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.running-task-item .task-pill {
+  width: 100%;
+  justify-content: flex-start;
+}
+
+/* Scrollbar Styling */
+.panel-content::-webkit-scrollbar {
+  width: 8px;
+}
+
+.panel-content::-webkit-scrollbar-track {
+  background: var(--vscode-scrollbarSlider-background);
+}
+
+.panel-content::-webkit-scrollbar-thumb {
+  background: var(--vscode-scrollbarSlider-hoverBackground);
+  border-radius: 4px;
+}
+
+.panel-content::-webkit-scrollbar-thumb:hover {
+  background: var(--vscode-scrollbarSlider-activeBackground);
+}

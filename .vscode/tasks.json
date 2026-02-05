@@ -1,0 +1,209 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "build:all",
+      "type": "shell",
+      "command": "echo 'Building all...' && sleep 2 && echo 'Build complete!'",
+      "group": "build",
+      "problemMatcher": []
+    },
+    {
+      "label": "build:production",
+      "type": "shell",
+      "command": "echo 'Building production bundle...' && sleep 3 && echo 'Production build complete!'",
+      "group": "build",
+      "problemMatcher": []
+    },
+    {
+      "label": "build:watch",
+      "type": "shell",
+      "command": "echo 'Starting watch mode...' && while true; do echo 'Watching for changes...'; sleep 5; done",
+      "isBackground": true,
+      "problemMatcher": []
+    },
+    {
+      "label": "build:clean",
+      "type": "shell",
+      "command": "echo 'Cleaning build directories...' && sleep 1 && echo 'Clean complete!'",
+      "group": "build",
+      "problemMatcher": []
+    },
+    {
+      "label": "test:all",
+      "type": "shell",
+      "command": "echo 'Running all tests...' && sleep 3 && echo '✓ All tests passed!'",
+      "group": "test",
+      "problemMatcher": []
+    },
+    {
+      "label": "test:unit",
+      "type": "shell",
+      "command": "echo 'Running unit tests...' && sleep 2 && echo '✓ Unit tests passed!'",
+      "group": "test",
+      "problemMatcher": []
+    },
+    {
+      "label": "test:integration",
+      "type": "shell",
+      "command": "echo 'Running integration tests...' && sleep 4 && echo '✓ Integration tests passed!'",
+      "group": "test",
+      "problemMatcher": []
+    },
+    {
+      "label": "test:coverage",
+      "type": "shell",
+      "command": "echo 'Running tests with coverage...' && sleep 3 && echo '✓ Coverage: 87%'",
+      "group": "test",
+      "problemMatcher": []
+    },
+    {
+      "label": "test:staging",
+      "type": "shell",
+      "command": "echo 'Running staging tests...' && sleep 3 && echo '✓ Staging tests passed!'",
+      "group": "test",
+      "problemMatcher": []
+    },
+    {
+      "label": "test:smoke",
+      "type": "shell",
+      "command": "echo 'Running smoke tests...' && sleep 2 && echo '✓ Smoke tests passed!'",
+      "group": "test",
+      "problemMatcher": []
+    },
+    {
+      "label": "dev:start",
+      "type": "shell",
+      "command": "echo 'Starting development server...' && echo 'Server running at http://localhost:3000' && while true; do sleep 10; done",
+      "isBackground": true,
+      "problemMatcher": []
+    },
+    {
+      "label": "lint:check",
+      "type": "shell",
+      "command": "echo 'Checking code style...' && sleep 2 && echo '✓ No linting errors found!'",
+      "group": "test",
+      "problemMatcher": []
+    },
+    {
+      "label": "lint:fix",
+      "type": "shell",
+      "command": "echo 'Fixing code style issues...' && sleep 2 && echo '✓ Fixed 3 issues!'",
+      "problemMatcher": []
+    },
+    {
+      "label": "typescript:check",
+      "type": "shell",
+      "command": "echo 'Type checking...' && sleep 2 && echo '✓ No type errors found!'",
+      "group": "test",
+      "problemMatcher": []
+    },
+    {
+      "label": "db:migrate",
+      "type": "shell",
+      "command": "echo 'Running database migrations...' && sleep 2 && echo '✓ Migrations complete!'",
+      "problemMatcher": []
+    },
+    {
+      "label": "db:seed",
+      "type": "shell",
+      "command": "echo 'Seeding database...' && sleep 3 && echo '✓ Database seeded successfully!'",
+      "problemMatcher": []
+    },
+    {
+      "label": "db:reset",
+      "type": "shell",
+      "command": "echo 'Resetting database...' && sleep 3 && echo '✓ Database reset complete!'",
+      "problemMatcher": []
+    },
+    {
+      "label": "docker:build",
+      "type": "shell",
+      "command": "echo 'Building Docker images...' && sleep 4 && echo '✓ Docker build complete!'",
+      "group": "build",
+      "problemMatcher": []
+    },
+    {
+      "label": "docker:up",
+      "type": "shell",
+      "command": "echo 'Starting Docker containers...' && echo '✓ Containers running' && while true; do sleep 10; done",
+      "isBackground": true,
+      "problemMatcher": []
+    },
+    {
+      "label": "docker:down",
+      "type": "shell",
+      "command": "echo 'Stopping Docker containers...' && sleep 2 && echo '✓ Containers stopped!'",
+      "problemMatcher": []
+    },
+    {
+      "label": "deploy:staging",
+      "type": "shell",
+      "command": "echo 'Deploying to staging...' && sleep 5 && echo '✓ Deployed to staging successfully!'",
+      "problemMatcher": []
+    },
+    {
+      "label": "deploy:production",
+      "type": "shell",
+      "command": "echo '⚠️  Deploying to PRODUCTION...' && sleep 5 && echo '✓ Deployed to production successfully!'",
+      "problemMatcher": []
+    },
+    {
+      "label": "deploy:rollback",
+      "type": "shell",
+      "command": "echo 'Rolling back deployment...' && sleep 3 && echo '✓ Rollback complete!'",
+      "problemMatcher": []
+    },
+    {
+      "label": "security:audit",
+      "type": "shell",
+      "command": "echo 'Running security audit...' && sleep 3 && echo '✓ No vulnerabilities found!'",
+      "group": "test",
+      "problemMatcher": []
+    },
+    {
+      "label": "version:bump",
+      "type": "shell",
+      "command": "echo 'Bumping version...' && sleep 1 && echo '✓ Version updated to 1.0.1'",
+      "problemMatcher": []
+    },
+    {
+      "label": "logs:production",
+      "type": "shell",
+      "command": "echo 'Streaming production logs...' && while true; do echo '[$(date)] Production log entry'; sleep 3; done",
+      "isBackground": true,
+      "problemMatcher": []
+    },
+    {
+      "label": "metrics:dashboard",
+      "type": "shell",
+      "command": "echo 'Opening metrics dashboard...' && sleep 1 && echo '✓ Dashboard available at http://localhost:9090'",
+      "problemMatcher": []
+    },
+    {
+      "label": "health:check",
+      "type": "shell",
+      "command": "echo 'Checking service health...' && sleep 1 && echo '✓ Service is healthy!'",
+      "problemMatcher": []
+    },
+    {
+      "label": "infra:plan",
+      "type": "shell",
+      "command": "echo 'Planning infrastructure changes...' && sleep 3 && echo '✓ Plan complete - 2 resources to add'",
+      "problemMatcher": []
+    },
+    {
+      "label": "infra:apply",
+      "type": "shell",
+      "command": "echo 'Applying infrastructure changes...' && sleep 5 && echo '✓ Infrastructure updated successfully!'",
+      "problemMatcher": []
+    },
+    {
+      "label": "ci:validate",
+      "type": "shell",
+      "command": "echo 'Validating CI configuration...' && sleep 2 && echo '✓ CI configuration is valid!'",
+      "group": "test",
+      "problemMatcher": []
+    }
+  ]
+}

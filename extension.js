@@ -1,33 +1,187 @@
-// The module 'vscode' contains the VS Code extensibility API
-// Import the module and reference it with the alias vscode in your code below
 const vscode = require('vscode');
-
-// This method is called when your extension is activated
-// Your extension is activated the very first time the command is executed
+const path = require('path');
+const fs = require('fs');
+const MdxWebviewProvider = require('./src/providers/MdxWebviewProvider');
 
 /**
  * @param {vscode.ExtensionContext} context
  */
 function activate(context) {
-	// Use the console to output diagnostic information (console.log) and errors (console.error)
-	// This line of code will only be executed once when your extension is activated
-	console.log('Congratulations, your extension "controlpanel" is now active!');
+	console.log('Control Panel extension is now active!');
 
-	// The command has been defined in the package.json file
-	// Now provide the implementation of the command with registerCommand
-	// The commandId parameter must match the command field in package.json
-	let disposable = vscode.commands.registerCommand('controlpanel.helloWorld', function () {
-		// The code you place here will be executed every time your command is executed
+	// Register the webview provider
+	const provider = new MdxWebviewProvider(context);
+	
+	context.subscriptions.push(
+		vscode.window.registerWebviewViewProvider('controlpanel.mdxView', provider)
+	);
 
-		// Display a message box to the user
-		vscode.window.showInformationMessage('Hello World from you butt!');
-	});
+	// Register commands
+	context.subscriptions.push(
+		vscode.commands.registerCommand('controlpanel.openMdx', async () => {
+			const workspaceFolders = vscode.workspace.workspaceFolders;
+			if (!workspaceFolders) {
+				vscode.window.showErrorMessage('No workspace folder open');
+				return;
+			}
 
-	context.subscriptions.push(disposable);
+			const cpdoxPath = path.join(workspaceFolders[0].uri.fsPath, '.cpdox');
+			
+			if (!fs.existsSync(cpdoxPath)) {
+				const create = await vscode.window.showInformationMessage(
+					'No .cpdox directory found. Create one?',
+					'Yes', 'No'
+				);
+				
+				if (create === 'Yes') {
+					fs.mkdirSync(cpdoxPath, { recursive: true });
+					await createExampleFiles(cpdoxPath);
+					vscode.window.showInformationMessage('.cpdox directory created with example files!');
+				}
+				return;
+			}
+
+			// Show the Control Panel view
+			await vscode.commands.executeCommand('controlpanel.mdxView.focus');
+		})
+	);
+
+	context.subscriptions.push(
+		vscode.commands.registerCommand('controlpanel.refreshView', async () => {
+			await provider.loadDefaultMdx();
+			await provider.sendTasksToWebview();
+		})
+	);
+
+	// Watch for changes in .cpdox directory
+	const workspaceFolders = vscode.workspace.workspaceFolders;
+	if (workspaceFolders) {
+		const cpdoxPath = path.join(workspaceFolders[0].uri.fsPath, '.cpdox');
+		
+		if (fs.existsSync(cpdoxPath)) {
+			const watcher = vscode.workspace.createFileSystemWatcher(
+				new vscode.RelativePattern(workspaceFolders[0], '.cpdox/**/*.mdx')
+			);
+
+			watcher.onDidChange(async () => {
+				await provider.loadDefaultMdx();
+			});
+
+			watcher.onDidCreate(async () => {
+				await provider.loadDefaultMdx();
+			});
+
+			watcher.onDidDelete(async () => {
+				await provider.loadDefaultMdx();
+			});
+
+			context.subscriptions.push(watcher);
+		}
+	}
 }
 
-// This method is called when your extension is deactivated
+async function createExampleFiles(cpdoxPath) {
+	const gettingStarted = `# Getting Started
+
+Welcome to the **Control Panel** - your interactive documentation and task management hub!
+
+## What is Control Panel?
+
+Control Panel combines documentation with executable tasks, making it easy to:
+
+- 📖 Browse documentation in MDX format
+- ▶️ Run tasks directly from documentation
+- 🔗 Navigate between related docs
+- ⚡ Monitor running tasks in real-time
+
+## Quick Start
+
+Check out our example tasks below:
+
+<TaskList labelStartsWith="build:" />
+
+## Navigation
+
+- [Development Guide](development.mdx)
+- [Deployment Guide](deployment.mdx)
+
+## Example Task Link
+
+Need to build the project? <TaskLink label="build:all" />
+`;
+
+	const development = `# Development Guide
+
+This guide covers the development workflow for your project.
+
+## Build Tasks
+
+<TaskList labelStartsWith="build:" />
+
+## Test Tasks
+
+Run your tests directly from here:
+
+<TaskList labelStartsWith="test:" />
+
+## Development Server
+
+Start the development server: <TaskLink label="dev:start" />
+
+## Code Quality
+
+- Lint your code: <TaskLink label="lint:check" />
+- Format your code: <TaskLink label="lint:fix" />
+
+## Related Docs
+
+- [Back to Getting Started](getting-started.mdx)
+- [Deployment Guide](deployment.mdx)
+`;
+
+	const deployment = `# Deployment Guide
+
+Ready to deploy your application? This guide will help you through the process.
+
+## Pre-Deployment Checklist
+
+1. Run all tests: <TaskLink label="test:all" />
+2. Build production bundle: <TaskLink label="build:production" />
+3. Run security audit: <TaskLink label="security:audit" />
+
+## Deployment Tasks
+
+<TaskList labelStartsWith="deploy:" />
+
+## Environment-Specific Deployments
+
+- **Staging**: <TaskLink label="deploy:staging" />
+- **Production**: <TaskLink label="deploy:production" />
+
+## Post-Deployment
+
+After deployment, monitor your application:
+
+- Check logs: <TaskLink label="logs:production" />
+- Run smoke tests: <TaskLink label="test:smoke" />
+
+## Related Docs
+
+- [Back to Getting Started](getting-started.mdx)
+- [Development Guide](development.mdx)
+`;
+
+	fs.writeFileSync(path.join(cpdoxPath, 'getting-started.mdx'), gettingStarted);
+	fs.writeFileSync(path.join(cpdoxPath, 'development.mdx'), development);
+	fs.writeFileSync(path.join(cpdoxPath, 'deployment.mdx'), deployment);
+}
+
 function deactivate() {}
+
+module.exports = {
+	activate,
+	deactivate
+};
 
 module.exports = {
 	activate,

@@ -1,0 +1,85 @@
+# Task Progress Features
+
+Welcome to the enhanced Control Panel with **intelligent task tracking** and **hierarchical subtask support**!
+
+## New Features
+
+### 🎯 Smart Progress Indicators
+
+The Control Panel now tracks your task execution history and provides intelligent progress indicators:
+
+#### First Run - Diagonal Stripes
+The first time you run a task, you'll see an animated diagonal stripe pattern (17% opacity) indicating that the task is running but we don't yet know how long it will take.
+
+#### Subsequent Runs - Progress Bar
+After running a task once, the extension remembers the duration. Future runs will show a blue progress bar that fills based on the 10-run rolling average, giving you an accurate estimate of completion time.
+
+#### Long-Running Tasks (>1 minute)
+Tasks that exceed 1 minute will display a solid blue background, indicating they're in steady-state execution.
+
+### 🌳 Hierarchical Subtask Visualization
+
+When tasks spawn subtasks (detected automatically), the task pill expands vertically to show:
+- **Parent task** with full controls
+- **Nested subtasks** with indentation
+- **Real-time updates** as subtasks start and complete
+
+### 📊 Running Tasks Panel
+
+A new "Running Tasks" panel appears at the bottom of the extension when any tasks are active. This panel shows:
+- All currently running tasks in one place
+- Progress indicators for each task
+- Quick access to focus terminals or stop tasks
+- Subtask hierarchies for complex operations
+
+## Example Tasks
+
+Try running these tasks to see the new features in action:
+
+<TaskList labelStartsWith="build:" />
+
+<TaskList labelStartsWith="test:" />
+
+## Task Management
+
+### Quick Actions
+
+Run a specific task: <TaskLink label="build:all" />
+
+Or compile the extension: <TaskLink label="compile" />
+
+### Task History
+
+The extension stores the last 10 execution durations for each task to calculate:
+- Average duration
+- Progress estimates
+- Completion percentages
+
+This data persists across VS Code restarts using `globalState`.
+
+## Technical Details
+
+### Duration Tracking
+- **Storage**: Last 10 durations per task
+- **Algorithm**: Rolling average for progress calculation
+- **Persistence**: Saved to VS Code global state
+
+### Subtask Detection
+The extension monitors task execution and detects:
+- NPM script spawning (e.g., `npm run child-task`)
+- VS Code task dependencies
+- Terminal output patterns
+
+### Progress Calculation
+
+```
+progress = (currentRuntime / averageDuration) * 100
+```
+
+The progress bar caps at 99% until the task completes, handling edge cases where tasks take longer than expected.
+
+## Navigation
+
+- [Back to Getting Started](getting-started.mdx)
+- [Development Guide](development.mdx)
+- [Deployment Guide](deployment.mdx)

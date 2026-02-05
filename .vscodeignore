@@ -1,6 +1,7 @@
 .vscode/**
 .vscode-test/**
 test/**
+test-workspace/**
 .gitignore
 .vscodeignore
 **/jsconfig.json
@@ -8,3 +9,7 @@ test/**
 **/.eslintrc.json
 .devcontainer/**
 node_modules/**
+webview-ui/**
+src/**
+webpack.config.js
+.cpdox/**

@@ -1,0 +1,75 @@
+# Deployment Guide
+
+Ready to deploy your application? This guide will help you through the process.
+
+## Pre-Deployment Checklist
+
+Before deploying, ensure everything is ready:
+
+1. ✅ Run all tests: <TaskLink label="test:all" />
+2. ✅ Build production bundle: <TaskLink label="build:production" />
+3. ✅ Run security audit: <TaskLink label="security:audit" />
+4. ✅ Update version: <TaskLink label="version:bump" />
+
+## Deployment Tasks
+
+<TaskList labelStartsWith="deploy:" />
+
+## Environment-Specific Deployments
+
+### Staging Environment
+
+Perfect for testing before production:
+
+- Deploy to staging: <TaskLink label="deploy:staging" />
+- Run staging smoke tests: <TaskLink label="test:staging" />
+
+### Production Environment
+
+When you're ready to go live:
+
+- Deploy to production: <TaskLink label="deploy:production" />
+- Run production smoke tests: <TaskLink label="test:smoke" />
+
+> **Warning**: Production deployments are irreversible. Always test in staging first!
+
+## Post-Deployment
+
+After deployment, monitor your application:
+
+### Monitoring
+
+- Check logs: <TaskLink label="logs:production" />
+- View metrics: <TaskLink label="metrics:dashboard" />
+- Check health: <TaskLink label="health:check" />
+
+### Rollback
+
+If something goes wrong:
+
+- Rollback to previous version: <TaskLink label="deploy:rollback" />
+
+## Infrastructure Tasks
+
+<TaskList labelStartsWith="infra:" />
+
+## CI/CD Pipeline
+
+Your continuous integration and deployment pipeline:
+
+<TaskList labelStartsWith="ci:" />
+
+## Related Docs
+
+- [Back to Getting Started](getting-started.mdx)
+- [Development Guide](development.mdx)
+
+---
+
+## Deployment Best Practices
+
+1. **Always test first** - Use staging environment
+2. **Monitor closely** - Watch logs after deployment
+3. **Have a rollback plan** - Know how to revert quickly
+4. **Document changes** - Keep deployment notes
+5. **Communicate** - Let your team know about deployments

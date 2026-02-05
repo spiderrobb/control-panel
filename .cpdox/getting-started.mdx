@@ -1,0 +1,46 @@
+# Getting Started
+
+Welcome to the **Control Panel** - your interactive documentation and task management hub!
+
+## What is Control Panel?
+
+Control Panel combines documentation with executable tasks, making it easy to:
+
+- 📖 Browse documentation in MDX format
+- ▶️ Run tasks directly from documentation
+- 🔗 Navigate between related docs
+- ⚡ Monitor running tasks in real-time
+
+## Quick Start
+
+Check out our example tasks below:
+
+<TaskList labelStartsWith="build:" />
+
+## Navigation
+
+- [Task Progress Features](task-progress.mdx) - **NEW!** Smart progress tracking
+- [Development Guide](development.mdx)
+- [Deployment Guide](deployment.mdx)
+
+## Example Task Link
+
+Need to build the project? <TaskLink label="build:all" />
+
+## How It Works
+
+The Control Panel extension watches the `.cpdox` directory for MDX files. When you click on links in the documentation, the panel updates to show the new content.
+
+### Interactive Task Components
+
+- **TaskLink**: Click to run a single task with hover controls
+- **TaskList**: Display and filter tasks by label prefix
+
+### Task States
+
+When you run a task, you'll see:
+- 🟢 **Running** - Green indicator with runtime counter
+- ⚡ **Focus** - Button to jump to the task's terminal
+- ⏹️ **Stop** - Button to terminate the task
+
+Try it out with any of the tasks listed above!

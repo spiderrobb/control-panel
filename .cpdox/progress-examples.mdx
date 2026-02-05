@@ -1,0 +1,96 @@
+# Visual Progress Examples
+
+This page demonstrates the different progress states for running tasks.
+
+## Progress States
+
+### First Run - Animated Stripes
+When you run a task for the first time, you'll see diagonal stripes animating across the background at 17% opacity. This indicates the task is running but we don't have historical data yet.
+
+Try it: <TaskLink label="build:extension" />
+
+### Subsequent Runs - Progress Bar
+After the first run, the extension remembers how long the task took. On subsequent runs, you'll see a blue progress bar that fills from left to right based on the 10-run rolling average.
+
+Try it: <TaskLink label="build:webview" />
+
+### Long Running Tasks - Solid Blue
+For tasks that run longer than 60 seconds, the progress indicator switches to a solid blue background to indicate steady-state execution.
+
+Try it: <TaskLink label="test:integration" />
+
+## Subtask Visualization
+
+When a task spawns subtasks, the task pill expands vertically to show the hierarchy:
+
+```
+┌─────────────────────────────────────┐
+│ 🟢 build:all        1m 23s  ⚡ ■   │
+├─────────────────────────────────────┤
+│   ↳ build:extension                 │
+│   ↳ build:webview                   │
+│   ↳ test:unit                       │
+└─────────────────────────────────────┘
+```
+
+### Example: Complex Build
+
+<TaskLink label="build:all" />
+
+This task typically spawns multiple subtasks that you'll see listed below the main task when running.
+
+## Running Tasks Panel
+
+When any tasks are running, a panel appears at the bottom of the extension showing:
+
+- All running tasks in one consolidated view
+- Progress indicators for each task
+- Subtask hierarchies
+- Quick access buttons (⚡ focus, ■ stop)
+
+The panel automatically shows/hides based on whether tasks are active.
+
+## Task Lists
+
+View all available tasks organized by prefix:
+
+### Build Tasks
+<TaskList labelStartsWith="build:" />
+
+### Test Tasks
+<TaskList labelStartsWith="test:" />
+
+### Utility Tasks
+<TaskList labelStartsWith="compile" />
+
+## Tips
+
+1. **Hover over task links** in idle state to see run button
+2. **Click ⚡ lightning** to focus the task's terminal
+3. **Click ■ square** to stop a running task
+4. **Watch the progress bar** to estimate completion time
+5. **Check the Running Tasks panel** for an overview of all active tasks
+
+## Technical Details
+
+The progress calculation uses a simple formula:
+
+```
+progress = (currentDuration / averageDuration) × 100
+```
+
+The extension stores the last 10 execution durations for each task to calculate the rolling average. This data persists across VS Code sessions using the extension's global state.
+
+## Try It Out!
+
+Run multiple tasks simultaneously to see how the Running Tasks panel manages them:
+
+1. <TaskLink label="build:extension" />
+2. <TaskLink label="build:webview" />
+3. <TaskLink label="test:unit" />
+
+All three tasks will appear in the Running Tasks panel at the bottom, each with its own progress indicator and controls.
+
+---
+
+[← Back to Getting Started](getting-started.mdx) | [View All Features →](task-progress.mdx)

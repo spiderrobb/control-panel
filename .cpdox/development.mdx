@@ -1,0 +1,63 @@
+# Development Guide
+
+This guide covers the development workflow for your project.
+
+## Build Tasks
+
+All build-related tasks are listed below. Click any task to execute it.
+
+<TaskList labelStartsWith="build:" />
+
+## Test Tasks
+
+Run your tests directly from here:
+
+<TaskList labelStartsWith="test:" />
+
+### Quick Test Commands
+
+- Run unit tests: <TaskLink label="test:unit" />
+- Run integration tests: <TaskLink label="test:integration" />
+- Run all tests with coverage: <TaskLink label="test:coverage" />
+
+## Development Server
+
+Start the development server: <TaskLink label="dev:start" />
+
+Once running, you can:
+- View the app at http://localhost:3000
+- See live updates as you code
+- Debug in your browser's dev tools
+
+### Stopping the Server
+
+When a task is running, hover over its link to see the stop button, or click the stop button (■) that appears in the running task pill.
+
+## Code Quality
+
+Keep your code clean and consistent:
+
+- Lint your code: <TaskLink label="lint:check" />
+- Format your code: <TaskLink label="lint:fix" />
+- Type check: <TaskLink label="typescript:check" />
+
+## Database Tasks
+
+For projects with databases:
+
+<TaskList labelStartsWith="db:" />
+
+## Docker Tasks
+
+Container management:
+
+<TaskList labelStartsWith="docker:" />
+
+## Related Docs
+
+- [Back to Getting Started](getting-started.mdx)
+- [Deployment Guide](deployment.mdx)
+
+---
+
+**Pro Tip**: You can run multiple tasks at once! Each task gets its own terminal and runs independently.
