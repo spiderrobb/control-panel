@@ -104,6 +104,91 @@
       "command": "code --uninstall-extension your-publisher-name.controlpanel && code --install-extension controlpanel-0.0.1.vsix",
       "problemMatcher": [],
       "dependsOn": ["package"]
+    },
+    {
+      "label": "fail:exit1",
+      "type": "shell",
+      "command": "echo 'Task running...' && sleep 1 && echo 'Task failed!' && exit 1",
+      "problemMatcher": []
+    },
+    {
+      "label": "fail:exit2",
+      "type": "shell",
+      "command": "echo 'Starting task...' && sleep 1 && echo 'Misuse of shell command!' && exit 2",
+      "problemMatcher": []
+    },
+    {
+      "label": "fail:exit127",
+      "type": "shell",
+      "command": "echo 'Attempting to run...' && sleep 1 && nonexistentcommand",
+      "problemMatcher": []
+    },
+    {
+      "label": "fail:timeout",
+      "type": "shell",
+      "command": "echo 'Starting long operation...' && sleep 30 && exit 1",
+      "problemMatcher": []
+    },
+    {
+      "label": "fail:pytest",
+      "type": "shell",
+      "command": "cd ${workspaceFolder} && python3 -m pytest test_failures.py -v || exit $?",
+      "problemMatcher": []
+    },
+    {
+      "label": "fail:jest",
+      "type": "shell",
+      "command": "cd ${workspaceFolder} && npx jest failures.test.js --no-coverage || exit $?",
+      "problemMatcher": []
+    },
+    {
+      "label": "fail:sequential-pipeline",
+      "type": "shell",
+      "command": "echo '✅ Pipeline would complete here if dependencies passed'",
+      "dependsOn": ["fail:exit1"],
+      "dependsOrder": "sequence",
+      "problemMatcher": []
+    },
+    {
+      "label": "fail:parallel-checks",
+      "type": "shell",
+      "command": "echo '✅ All checks passed'",
+      "dependsOn": ["lint", "fail:exit2"],
+      "problemMatcher": []
+    },
+    {
+      "label": "fail:nested-child",
+      "type": "shell",
+      "command": "echo 'Child task...' && sleep 1 && exit 1",
+      "problemMatcher": []
+    },
+    {
+      "label": "fail:nested-middle",
+      "type": "shell",
+      "command": "echo '✅ Middle task complete'",
+      "dependsOn": ["fail:nested-child"],
+      "problemMatcher": []
+    },
+    {
+      "label": "fail:nested-parent",
+      "type": "shell",
+      "command": "echo '✅ Parent task complete'",
+      "dependsOn": ["fail:nested-middle"],
+      "problemMatcher": []
+    },
+    {
+      "label": "fail:partial-success",
+      "type": "shell",
+      "command": "echo '✅ Partial completion'",
+      "dependsOn": ["fail:exit1", "fail:exit2", "lint"],
+      "problemMatcher": []
+    },
+    {
+      "label": "fail:background-crash",
+      "type": "shell",
+      "command": "echo 'Background task started...' && sleep 3 && echo 'Crashing!' && exit 1",
+      "isBackground": false,
+      "problemMatcher": []
     }
   ]
 }

@@ -33,10 +33,41 @@ body {
   border-bottom: 1px solid var(--vscode-panel-border);
   font-size: 12px;
   color: var(--vscode-descriptionForeground);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.breadcrumb-navigation {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.breadcrumb-trail {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+}
+
+.breadcrumb-separator {
+  margin: 0 4px;
+  opacity: 0.6;
+}
+
+.previous-file {
+  opacity: 0.7;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .current-file {
   font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .content {
@@ -337,6 +368,42 @@ body {
   background-color: var(--vscode-charts-blue);
 }
 
+/* Stopping State Styles */
+.task-pill.bg-stopping {
+  background-color: var(--vscode-editor-background);
+  opacity: 0.6;
+  border-left-color: var(--vscode-charts-yellow);
+  position: relative;
+}
+
+.task-pill.bg-stopping::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  height: 100%;
+  width: 100%;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    var(--vscode-charts-yellow) 50%,
+    transparent 100%
+  );
+  background-size: 200% 100%;
+  animation: stopping-shimmer 1.5s ease-in-out infinite;
+  opacity: 0.2;
+  pointer-events: none;
+}
+
+@keyframes stopping-shimmer {
+  0% {
+    background-position: -100% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
 /* Error State Styles */
 .task-pill.error {
   background-color: var(--vscode-inputValidation-errorBackground);
@@ -378,7 +445,7 @@ body {
 .running-tasks-panel {
   flex-shrink: 0;
   width: 100%;
-  padding: 12px 0;
+  padding: 6px 0;
   border-top: 1px solid var(--vscode-panel-border);
   background-color: var(--vscode-sideBar-background);
   box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.15);
@@ -391,13 +458,13 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 8px;
-  padding: 0 16px;
+  margin-bottom: 4px;
+  padding: 0 12px;
 }
 
 .running-tasks-panel h3 {
   margin: 0;
-  font-size: 0.9em;
+  font-size: 0.8em;
   font-weight: 600;
   color: var(--vscode-foreground);
   text-transform: uppercase;
@@ -417,10 +484,10 @@ body {
 .running-task-row {
   display: flex;
   flex-direction: column;
-  padding-top: 6px;
-  padding-bottom: 6px;
-  padding-right: 16px;
-  padding-left: 16px;
+  padding-top: 3px;
+  padding-bottom: 3px;
+  padding-right: 12px;
+  padding-left: 12px;
   position: relative;
   border-bottom: 1px solid rgba(128, 128, 128, 0.1);
   transition: background-color 0.2s;
@@ -550,11 +617,10 @@ body {
 .starred-tasks-panel {
   flex-shrink: 0;
   width: 100%;
-  padding: 12px 0;
+  padding: 4px 0;
   border-top: 1px solid var(--vscode-panel-border);
   background-color: var(--vscode-sideBar-background);
-  box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.15);
-  max-height: 30vh;
+  box-shadow: 0 -1px 4px rgba(0, 0, 0, 0.1);
   display: flex;
   flex-direction: column;
 }
@@ -564,14 +630,14 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 8px;
-  padding: 0 16px;
+  margin-bottom: 2px;
+  padding: 0 12px;
 }
 
 .recent-tasks-panel h3,
 .starred-tasks-panel h3 {
   margin: 0;
-  font-size: 0.9em;
+  font-size: 0.8em;
   font-weight: 600;
   color: var(--vscode-foreground);
   text-transform: uppercase;
@@ -589,10 +655,14 @@ body {
   min-height: 0;
 }
 
+.starred-tasks-panel .panel-content {
+  max-height: calc(5 * 31px);
+}
+
 .empty-state {
-  padding: 12px 16px;
+  padding: 6px 12px;
   color: var(--vscode-descriptionForeground);
-  font-size: 12px;
+  font-size: 11px;
   font-style: italic;
   text-align: center;
 }
@@ -600,8 +670,8 @@ body {
 .task-list-item {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 16px;
+  gap: 6px;
+  padding: 3px 12px;
   border-bottom: 1px solid rgba(128, 128, 128, 0.1);
   transition: background-color 0.2s;
   font-size: 12px;

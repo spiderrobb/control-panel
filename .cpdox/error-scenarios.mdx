@@ -1,0 +1,96 @@
+# Error Scenarios & Failure Testing
+
+This guide demonstrates the Control Panel's error handling capabilities including:
+- 🔴 **Task Failures** - Visual feedback when tasks fail
+- 🔗 **Dependency Propagation** - Parent tasks update when dependencies fail
+- 🔄 **Retry Capability** - Retry failed tasks
+- 📊 **State Persistence** - Error states survive navigation
+
+## Simple Task Failures
+
+These tasks will fail immediately with different exit codes:
+
+### Quick Failures
+
+<TaskLink label="fail:exit1" /> - Exit code 1 (generic failure)
+
+<TaskLink label="fail:exit2" /> - Exit code 2 (misuse of shell command)
+
+<TaskLink label="fail:exit127" /> - Exit code 127 (command not found)
+
+<TaskLink label="fail:timeout" /> - Task that times out
+
+### Test Framework Failures
+
+<TaskLink label="fail:pytest" /> - Run pytest with failing tests
+
+<TaskLink label="fail:jest" /> - Run jest with failing tests
+
+## Dependency Failure Propagation
+
+When a task with `dependsOn` has a failing dependency, the parent task should also fail:
+
+### Sequential Dependencies
+
+<TaskLink label="fail:sequential-pipeline" /> - Parent task with failing dependency
+
+This pipeline runs tasks in sequence. When **fail:exit1** fails early, the parent should fail immediately.
+
+### Parallel Dependencies
+
+<TaskLink label="fail:parallel-checks" /> - Multiple dependencies, one fails
+
+When **fail:exit2** fails among parallel dependencies, all running siblings complete but the parent still fails.
+
+### Nested Dependencies
+
+<TaskLink label="fail:nested-parent" /> - Multi-level dependency chain
+
+Three levels deep: parent → middle → failing child. The failure should propagate all the way up.
+
+## Mixed Success/Failure Scenarios
+
+<TaskLink label="fail:partial-success" /> - Some dependencies pass, some fail
+
+This demonstrates how the UI handles mixed results in a dependency tree.
+
+## Error Recovery
+
+After a task fails:
+1. ❌ The task pill turns **red** with the exit code
+2. 🔄 A **Retry** button appears to re-run the task
+3. 📍 The task remains visible in the Running Tasks panel for 5 seconds
+4. 🔗 If it's a dependency failure, shows which subtask caused it
+
+### Try It
+
+1. Run <TaskLink label="fail:exit1" />
+2. Notice the red error state with exit code
+3. Click the retry button to run it again
+4. Navigate to another page and back - the state persists!
+
+## State Persistence Testing
+
+To test state persistence:
+1. Run <TaskLink label="fail:sequential-pipeline" />
+2. Wait for it to fail
+3. Navigate to [Development Guide](development.mdx)
+4. Navigate back here
+5. ✅ The failed task should still be visible with error state
+
+## Background Task Failures
+
+<TaskLink label="fail:background-crash" /> - Background process that crashes
+
+This starts a background task that crashes after a few seconds.
+
+## All Error Tasks
+
+<TaskList labelStartsWith="fail:" />
+
+## Navigation
+
+- [← Back to Getting Started](getting-started.mdx)
+- [Development Guide](development.mdx)
+- [Deployment Guide](deployment.mdx)
+- [Workflows Guide](workflows.mdx)

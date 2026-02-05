@@ -83,6 +83,8 @@ function RunningTaskItem({ label, state, onStop, onFocus, onOpenDefinition, onDi
   const failedDependency = state?.failedDependency;
   const canStop = state?.canStop !== false;
   const canFocus = state?.canFocus !== false;
+  const taskState = state?.state; // 'starting'|'running'|'stopping'|'stopped'|'failed'
+  const isStopping = taskState === 'stopping';
 
   useEffect(() => {
     if (!startTime) return;
@@ -114,6 +116,7 @@ function RunningTaskItem({ label, state, onStop, onFocus, onOpenDefinition, onDi
   };
 
   const getBackgroundClass = () => {
+    if (isStopping) return 'bg-stopping';
     if (isFailed) return 'error';
     if (runtime > 60000) return 'bg-solid';
     if (isFirstRun || !avgDuration) return 'bg-stripes';
@@ -191,12 +194,12 @@ function RunningTaskItem({ label, state, onStop, onFocus, onOpenDefinition, onDi
                 </span>
               </Tooltip>
             ) : (
-              <Tooltip title={canStop ? "Stop task" : "Cannot stop task"}>
+              <Tooltip title={isStopping ? "Stopping..." : (canStop ? "Stop task" : "Cannot stop task")}>
                 <span>
                   <IconButton
                     size="small"
                     onClick={() => onStop(label)}
-                    disabled={!canStop || isFailed}
+                    disabled={!canStop || isFailed || isStopping}
                     sx={{ p: 0.5 }}
                   >
                     <StopIcon sx={{ fontSize: 16 }} />

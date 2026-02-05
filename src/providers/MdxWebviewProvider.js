@@ -12,6 +12,7 @@ class MdxWebviewProvider {
     this._taskTerminals = new Map(); // Map<label, terminal>
     this._taskFailures = new Map(); // Map<label, {exitCode, reason}>
     this._taskStates = new Map(); // Map<label, 'starting'|'running'|'stopping'|'stopped'|'failed'>
+    this._stoppingTasks = new Set(); // Set<label> - tracks tasks currently being stopped to prevent circular dependencies
     
     // Watch for task execution changes
     this._taskExecution = vscode.tasks.onDidStartTaskProcess((e) => {
@@ -80,6 +81,27 @@ class MdxWebviewProvider {
   // Starred tasks
   async getStarredTasks() {
     return this._context.globalState.get('starredTasks', []);
+  }
+
+  // Navigation history (workspace-specific)
+  async getNavigationHistory() {
+    return this._context.workspaceState.get('navigationHistory', []);
+  }
+
+  async getNavigationIndex() {
+    return this._context.workspaceState.get('navigationIndex', -1);
+  }
+
+  async updateNavigationHistory(history, index) {
+    await this._context.workspaceState.update('navigationHistory', history);
+    await this._context.workspaceState.update('navigationIndex', index);
+    
+    // Send updated history to webview
+    this._view?.webview.postMessage({
+      type: 'updateNavigationHistory',
+      history,
+      index
+    });
   }
 
   // Failed tasks persistence
@@ -154,6 +176,17 @@ class MdxWebviewProvider {
     return subtasks ? Array.from(subtasks) : [];
   }
 
+  async restoreNavigationState() {
+    const history = await this.getNavigationHistory();
+    const index = await this.getNavigationIndex();
+    
+    this._view?.webview.postMessage({
+      type: 'updateNavigationHistory',
+      history,
+      index
+    });
+  }
+
   async restoreRunningTasksState() {
     // Re-send taskStarted messages for tasks that are still running
     // This handles the case where the webview is hidden/shown or extension view is switched
@@ -224,6 +257,9 @@ class MdxWebviewProvider {
 
     webviewView.webview.html = this._getHtmlForWebview(webviewView.webview);
     
+    // Restore navigation history
+    this.restoreNavigationState();
+    
     // Restore state for running tasks when webview reconnects
     this.restoreRunningTasksState();
 
@@ -236,6 +272,15 @@ class MdxWebviewProvider {
           break;
         case 'navigate':
           await this.loadMdxFile(message.file);
+          break;
+        case 'navigateBack':
+          await this.navigateBack();
+          break;
+        case 'navigateForward':
+          await this.navigateForward();
+          break;
+        case 'navigateToHistoryItem':
+          await this.navigateToHistoryItem(message.index);
           break;
         case 'runTask':
           await this.runTask(message.label);
@@ -291,7 +336,7 @@ class MdxWebviewProvider {
     }
   }
 
-  async loadMdxFile(fileName) {
+  async loadMdxFile(fileName, skipHistory = false) {
     const workspaceFolders = vscode.workspace.workspaceFolders;
     if (!workspaceFolders) {
       return;
@@ -308,6 +353,33 @@ class MdxWebviewProvider {
     try {
       const content = fs.readFileSync(filePath, 'utf8');
       
+      // Update navigation history (skip duplicates)
+      if (!skipHistory) {
+        let history = await this.getNavigationHistory();
+        let index = await this.getNavigationIndex();
+        
+        // Get current file at index (if any)
+        const currentFile = index >= 0 && index < history.length ? history[index] : null;
+        
+        // Skip if navigating to the same file
+        if (currentFile !== fileName) {
+          // Clear forward history when navigating to a new file
+          history = history.slice(0, index + 1);
+          
+          // Add new file
+          history.push(fileName);
+          
+          // Limit to 20 items
+          if (history.length > 20) {
+            history.shift();
+          } else {
+            index++;
+          }
+          
+          await this.updateNavigationHistory(history, index);
+        }
+      }
+      
       this._view?.webview.postMessage({
         type: 'loadMdx',
         content: content, // Send raw MDX content
@@ -315,6 +387,40 @@ class MdxWebviewProvider {
       });
     } catch (error) {
       vscode.window.showErrorMessage(`Error loading MDX: ${error.message}`);
+    }
+  }
+
+  async navigateBack() {
+    let history = await this.getNavigationHistory();
+    let index = await this.getNavigationIndex();
+    
+    if (index > 0) {
+      index--;
+      await this.updateNavigationHistory(history, index);
+      await this.loadMdxFile(history[index], true); // skipHistory = true
+    }
+  }
+
+  async navigateForward() {
+    let history = await this.getNavigationHistory();
+    let index = await this.getNavigationIndex();
+    
+    if (index < history.length - 1) {
+      index++;
+      await this.updateNavigationHistory(history, index);
+      await this.loadMdxFile(history[index], true); // skipHistory = true
+    }
+  }
+
+  async navigateToHistoryItem(targetIndex) {
+    let history = await this.getNavigationHistory();
+    let currentIndex = await this.getNavigationIndex();
+    
+    if (targetIndex >= 0 && targetIndex < history.length) {
+      // Navigate to the item and truncate forward history (browser-like behavior)
+      history = history.slice(0, targetIndex + 1);
+      await this.updateNavigationHistory(history, targetIndex);
+      await this.loadMdxFile(history[targetIndex], true); // skipHistory = true
     }
   }
 
@@ -475,8 +581,8 @@ class MdxWebviewProvider {
     const execution = this._runningTasks.get(label);
     const state = this._taskStates.get(label);
     
-    // Don't try to stop if already stopped or failed
-    if (!execution || state === 'stopped' || state === 'failed') {
+    // Don't try to stop if already stopped, failed, or currently being stopped (circular dependency protection)
+    if (!execution || state === 'stopped' || state === 'failed' || this._stoppingTasks.has(label)) {
       this._view?.webview.postMessage({
         type: 'taskStateChanged',
         taskLabel: label,
@@ -487,7 +593,35 @@ class MdxWebviewProvider {
       return;
     }
     
+    // Mark this task as being stopped to prevent circular dependencies
+    this._stoppingTasks.add(label);
+    
+    // Set stopping state and notify UI immediately
     this._taskStates.set(label, 'stopping');
+    this._view?.webview.postMessage({
+      type: 'taskStateChanged',
+      taskLabel: label,
+      state: 'stopping',
+      canStop: false,
+      canFocus: false
+    });
+    
+    // Recursively stop all child tasks in parallel (faster termination)
+    const children = this.getTaskHierarchy(label);
+    if (children && children.length > 0) {
+      console.log(`[ControlPanel] Stopping ${children.length} child task(s) of "${label}"...`);
+      try {
+        await Promise.all(children.map(childLabel => this.stopTask(childLabel)));
+        
+        // Clean up taskHierarchy after children are stopped
+        for (const childLabel of children) {
+          this.removeSubTask(label, childLabel);
+        }
+      } catch (error) {
+        console.warn(`[ControlPanel] Error stopping children of task ${label}:`, error);
+      }
+    }
+    
     let stopped = false;
     
     // Method 1: Try VS Code API terminate() - the standard way
@@ -579,6 +713,7 @@ class MdxWebviewProvider {
     // Clean up tracking regardless of stop success
     this._runningTasks.delete(label);
     this._taskStates.set(label, 'stopped');
+    this._stoppingTasks.delete(label); // Remove from stopping set
     
     this._view?.webview.postMessage({
       type: 'taskStateChanged',

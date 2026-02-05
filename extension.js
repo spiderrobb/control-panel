@@ -78,6 +78,35 @@ function activate(context) {
 			context.subscriptions.push(watcher);
 		}
 	}
+
+	// Watch for active editor changes to sync MDX file navigation
+	context.subscriptions.push(
+		vscode.window.onDidChangeActiveTextEditor(async (editor) => {
+			if (!editor || !editor.document) {
+				return;
+			}
+
+			const filePath = editor.document.uri.fsPath;
+			const workspaceFolders = vscode.workspace.workspaceFolders;
+			
+			if (!workspaceFolders) {
+				return;
+			}
+
+			// Check if the file is an MDX file in any .cpdox folder within the workspace
+			const workspaceRoot = workspaceFolders[0].uri.fsPath;
+			const relativePath = path.relative(workspaceRoot, filePath);
+			
+			// Match any .cpdox folder at any depth
+			if (relativePath.includes('.cpdox') && filePath.endsWith('.mdx')) {
+				// Extract just the filename
+				const fileName = path.basename(filePath);
+				
+				// Navigate the Control Panel to this file
+				await provider.loadMdxFile(fileName);
+			}
+		})
+	);
 }
 
 async function createExampleFiles(cpdoxPath) {
