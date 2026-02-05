@@ -246,7 +246,7 @@ class MdxWebviewProvider {
     }
   }
 
-  resolveWebviewView(webviewView, context, token) {
+  resolveWebviewView(webviewView, _context, _token) {
     this._view = webviewView;
 
     webviewView.webview.options = {
@@ -298,7 +298,7 @@ class MdxWebviewProvider {
         case 'toggleStar':
           await this.toggleStarTask(message.label);
           break;
-        case 'getTaskLists':
+        case 'getTaskLists': {
           const recent = await this.getRecentlyUsedTasks();
           const starred = await this.getStarredTasks();
           this._view?.webview.postMessage({
@@ -310,6 +310,7 @@ class MdxWebviewProvider {
             tasks: starred
           });
           break;
+        }
         case 'dismissTask':
           await this.clearFailedTask(message.label);
           break;
@@ -425,7 +426,6 @@ class MdxWebviewProvider {
 
   async navigateToHistoryItem(targetIndex) {
     let history = await this.getNavigationHistory();
-    let currentIndex = await this.getNavigationIndex();
     
     if (targetIndex >= 0 && targetIndex < history.length) {
       // Navigate to the item and truncate forward history (browser-like behavior)

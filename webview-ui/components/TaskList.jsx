@@ -1,4 +1,3 @@
-import React from 'react';
 import TaskLink from './TaskLink';
 
 function TaskList({ labelStartsWith, tasks, onRun, onStop, onFocus, onOpenDefinition, runningTasks, starredTasks, onToggleStar }) {

@@ -1,0 +1,288 @@
+# Testing Documentation
+
+Welcome to the ControlPanel extension testing documentation. This section covers the comprehensive testing strategy, developer workflows, and testing tools available for ensuring reliable process management and error handling.
+
+## 📋 Quick Navigation
+
+- [Test Overview](#test-overview)
+- [Running Tests](#running-tests)
+- [Test Categories](#test-categories) 
+- [Developer Workflow](#developer-workflow)
+- [Debugging Tests](#debugging-tests)
+- [Bug Reports](#bug-reports)
+
+## Test Overview
+
+The ControlPanel extension has a comprehensive testing strategy focused on:
+
+- **Process Lifecycle Management** - Task state transitions and cleanup
+- **Failure State Handling** - Error propagation and recovery
+- **Concurrency Testing** - Race conditions and parallel operations  
+- **Resource Management** - Memory leaks and terminal cleanup
+- **Integration Testing** - End-to-end workflows and stress testing
+
+## Running Tests
+
+### Quick Validation
+
+<TaskLink label="test:validate" />
+
+Validates the test infrastructure without running VS Code tests.
+
+### Full Test Suite
+
+<TaskLink label="test:all" />
+
+Runs the complete test suite in VS Code test environment.
+
+### Test Categories
+
+#### Process Lifecycle Tests
+<TaskLink label="test:lifecycle" />
+
+Tests task state transitions, startup sequences, and termination handling.
+
+#### Failure Scenario Tests  
+<TaskLink label="test:failures" />
+
+Comprehensive failure handling including exit codes, timeouts, and dependency failures.
+
+#### Concurrency Tests
+<TaskLink label="test:concurrency" />
+
+Race condition prevention and concurrent operation handling.
+
+#### Resource Management Tests
+<TaskLink label="test:resources" />  
+
+Memory leak detection and terminal resource cleanup verification.
+
+#### Integration Stress Tests
+<TaskLink label="test:stress" />
+
+High-load testing and system stability validation.
+
+### Code Quality
+
+<TaskLink label="test:lint" />
+
+ESLint validation for code quality and standards compliance.
+
+## Developer Workflow
+
+### Pre-Development Testing
+
+1. **Quick Validation**
+   <TaskLink label="test:quick-suite" />
+   
+   Run before starting development to ensure baseline functionality.
+
+2. **Code Quality Check**
+   <TaskLink label="test:lint" />
+
+### During Development
+
+1. **Compile and Test**
+   <TaskLink label="compile" />
+   
+   Compile the extension before running specific tests.
+
+2. **Target Specific Issues**
+   - Process issues: <TaskLink label="test:lifecycle" />
+   - Error handling: <TaskLink label="test:failures" />
+   - Performance: <TaskLink label="test:concurrency" />
+   - Memory leaks: <TaskLink label="test:resources" />
+
+### Pre-Commit Testing
+
+<TaskLink label="test:full-suite" />
+
+Run the complete test suite before committing changes.
+
+### CI/CD Pipeline
+
+<TaskLink label="test:ci" />
+
+Complete continuous integration test pipeline including compilation, linting, and full test suite.
+
+## Test Categories Deep Dive
+
+### 1. Process Lifecycle Testing
+
+**Focus:** Task state management and transitions
+
+**Key Scenarios:**
+- Task startup sequence: `not-started → starting → running`
+- Normal completion: `running → stopped`  
+- Failure handling: `running → failed`
+- Termination sequence: `running → stopping → stopped`
+
+**What It Tests:**
+- State consistency across operations
+- Resource cleanup on completion
+- Terminal integration and management
+- Task history persistence
+
+### 2. Failure Scenario Testing
+
+**Focus:** Error handling and recovery mechanisms
+
+**Key Scenarios:**
+- Exit code handling (1, 2, 127)
+- Timeout management
+- Dependency chain failures
+- Framework-specific failures (Jest, Pytest)
+- Malformed task definitions
+
+**What It Tests:**
+- Error propagation through dependency chains
+- Graceful failure handling
+- State recovery after errors
+- User feedback for failures
+
+### 3. Concurrency Testing
+
+**Focus:** Race condition prevention and parallel operations
+
+**Key Scenarios:**
+- Simultaneous task execution
+- Rapid start/stop cycles
+- Concurrent state modifications
+- Webview reconnection during tasks
+
+**What It Tests:**
+- Thread safety of state operations
+- Consistent behavior under load
+- Prevention of race conditions
+- System responsiveness
+
+### 4. Resource Management Testing  
+
+**Focus:** Memory usage and resource cleanup
+
+**Key Scenarios:**
+- State map cleanup verification
+- Terminal creation and disposal
+- Event listener management
+- Extension lifecycle cleanup
+
+**What It Tests:**
+- Memory leak prevention
+- Proper resource disposal
+- Long-running stability
+- Extension reload behavior
+
+### 5. Integration Stress Testing
+
+**Focus:** Real-world usage patterns and system limits
+
+**Key Scenarios:**
+- High-volume task processing
+- Extended operation periods
+- Complex dependency resolution
+- Performance under load
+
+**What It Tests:**
+- Scalability limits
+- Performance characteristics
+- System stability over time
+- Real-world usage patterns
+
+## Debugging Tests
+
+### Individual Test Debugging
+
+Run specific test files with detailed output:
+
+```bash
+npx mocha test/[test-file].test.js --timeout 30000 --reporter spec
+```
+
+### VS Code Test Debugging
+
+1. Open the test file in VS Code
+2. Set breakpoints in test code
+3. Use "Debug Test" command in VS Code
+4. Step through test execution
+
+### Test Infrastructure Debugging
+
+<TaskLink label="test:validate" />
+
+Validates test file structure and configuration without running tests.
+
+## Test Environment
+
+### Mock Tasks Available
+
+The extension includes comprehensive mock tasks for testing:
+
+**Failure Tasks:**
+- <TaskLink label="fail:exit1" /> - Exit code 1 failure
+- <TaskLink label="fail:exit2" /> - Exit code 2 failure  
+- <TaskLink label="fail:exit127" /> - Command not found
+- <TaskLink label="fail:timeout" /> - Long-running timeout
+- <TaskLink label="fail:pytest" /> - Python test failure
+- <TaskLink label="fail:jest" /> - JavaScript test failure
+
+**Dependency Chain Tasks:**
+- <TaskLink label="fail:sequential-pipeline" /> - Sequential dependency failure
+- <TaskLink label="fail:parallel-checks" /> - Parallel execution failure
+- <TaskLink label="fail:nested-parent" /> - Complex nested dependencies
+
+**Build Tasks:**
+- <TaskLink label="build" /> - Production build
+- <TaskLink label="compile" /> - Development compilation
+- <TaskLink label="watch" /> - Watch mode compilation
+
+## Bug Reports
+
+Critical bugs identified through testing are documented in:
+- `BUGS_IDENTIFIED.md` - Detailed bug analysis
+- `TESTING_STRATEGY_COMPLETE.md` - Implementation summary
+
+### Priority Issues Found
+
+1. **Race Condition in Task Stopping** (Critical)
+2. **Memory Leaks in State Maps** (High)
+3. **Missing Circular Dependency Detection** (High)
+4. **Inconsistent Task State Management** (High)
+
+## Best Practices
+
+### Writing New Tests
+
+1. Use descriptive test names
+2. Include proper setup/teardown
+3. Test both success and failure paths
+4. Verify state cleanup
+5. Use appropriate timeouts
+
+### Test Maintenance
+
+1. Run tests regularly during development
+2. Update tests when functionality changes
+3. Add tests for bug fixes
+4. Monitor test performance
+5. Keep test documentation current
+
+## Performance Considerations
+
+- Tests are designed for parallel execution where safe
+- Timeouts are set appropriately for different test types
+- Resource cleanup is verified to prevent test interference
+- Memory usage is monitored during stress tests
+
+## Getting Help
+
+If tests are failing or you need assistance:
+
+1. Check the test output for specific errors
+2. Review the bug reports for known issues
+3. Run individual test categories to isolate problems
+4. Validate test infrastructure first
+5. Check VS Code extension logs for runtime issues
+
+---
+
+*For more information about the testing implementation, see the complete documentation in `TEST_IMPLEMENTATION_SUMMARY.md`.*

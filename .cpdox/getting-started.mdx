@@ -2,9 +2,22 @@
 
 Welcome to the **Control Panel** development environment. This panel assists in managing the extension's lifecycle, building, testing, and packaging.
 
+## 📋 Quick Navigation
+
+- [Installation Guide](installation.mdx) - Setup instructions
+- [Development Workflow](development.mdx) - Daily development tasks  
+- [Testing Documentation](testing.mdx) - Comprehensive testing guide
+- [Test Workflow](test-workflow.mdx) - Developer testing workflows
+- [Debugging Guide](debugging.mdx) - Bug testing and troubleshooting
+- [Task Progress](task-progress.mdx) - Task execution monitoring
+- [Error Scenarios](error-scenarios.mdx) - Error handling examples
+- [Deployment Guide](deployment.mdx) - Release and packaging
+
 ## Getting Started
 
 New to this extension? Check out the [Installation Guide](installation.mdx) for step-by-step instructions on how to install and run the extension in your local VS Code environment.
+
+**For Testing & Development**: Start with the [Testing Documentation](testing.mdx) to understand the comprehensive testing strategy and available tools.
 
 Below is a list of available tasks derived from the `package.json` scripts.
 
@@ -21,12 +34,45 @@ Use these tasks to compile the extension.
 - **Watch Mode**: Automatically recompiles when files change.
 <TaskLink label="watch" />
 
-## Quality & Testing
+## Testing & Quality Assurance
 
-Ensure code quality and run tests.
+### Quick Testing
+
+- **Validate Tests**: Check test infrastructure without running full tests.
+<TaskLink label="test:validate" />
+
+- **Quick Test Suite**: Fast validation including linting and infrastructure checks.
+<TaskLink label="test:quick-suite" />
+
+### Comprehensive Testing
+
+- **Full Test Suite**: Run all test categories for complete validation.
+<TaskLink label="test:full-suite" />
+
+- **CI Pipeline**: Complete continuous integration pipeline.
+<TaskLink label="test:ci" />
+
+### Individual Test Categories
+
+- **Process Lifecycle**: Test task state management and transitions.
+<TaskLink label="test:lifecycle" />
+
+- **Failure Scenarios**: Test error handling and recovery.
+<TaskLink label="test:failures" />
+
+- **Concurrency**: Test race conditions and parallel operations.
+<TaskLink label="test:concurrency" />
+
+- **Resource Management**: Test memory usage and cleanup.
+<TaskLink label="test:resources" />
+
+- **Stress Testing**: High-load and performance testing.
+<TaskLink label="test:stress" />
+
+### Code Quality
 
 - **Lint**: Checks code for style and errors.
-<TaskLink label="lint" />
+<TaskLink label="test:lint" />
 
 - **Run Tests**: Executes the test suite.
 <TaskLink label="test" />

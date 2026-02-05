@@ -189,6 +189,95 @@
       "command": "echo 'Background task started...' && sleep 3 && echo 'Crashing!' && exit 1",
       "isBackground": false,
       "problemMatcher": []
+    },
+    {
+      "label": "test:all",
+      "type": "shell",
+      "command": "npm test",
+      "group": "test",
+      "problemMatcher": [],
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": false,
+        "panel": "shared"
+      }
+    },
+    {
+      "label": "test:validate",
+      "type": "shell",
+      "command": "node validate-tests.js",
+      "group": "test",
+      "problemMatcher": []
+    },
+    {
+      "label": "test:lifecycle",
+      "type": "shell",
+      "command": "npx mocha test/process-lifecycle.test.js --ui tdd --timeout 30000",
+      "group": "test",
+      "problemMatcher": []
+    },
+    {
+      "label": "test:failures",
+      "type": "shell",
+      "command": "npx mocha test/failure-scenarios.test.js --ui tdd --timeout 30000",
+      "group": "test",
+      "problemMatcher": []
+    },
+    {
+      "label": "test:concurrency",
+      "type": "shell",
+      "command": "npx mocha test/concurrency.test.js --ui tdd --timeout 30000",
+      "group": "test",
+      "problemMatcher": []
+    },
+    {
+      "label": "test:resources",
+      "type": "shell",
+      "command": "npx mocha test/resource-management.test.js --ui tdd --timeout 30000",
+      "group": "test",
+      "problemMatcher": []
+    },
+    {
+      "label": "test:stress",
+      "type": "shell",
+      "command": "npx mocha test/integration-stress.test.js --ui tdd --timeout 60000",
+      "group": "test",
+      "problemMatcher": []
+    },
+    {
+      "label": "test:lint",
+      "type": "shell",
+      "command": "npm run lint",
+      "group": "test",
+      "problemMatcher": []
+    },
+    {
+      "label": "test:quick-suite",
+      "type": "shell",
+      "command": "echo '🧪 Running quick test validation...'",
+      "dependsOn": ["test:validate", "test:lint"],
+      "dependsOrder": "sequence",
+      "group": "test",
+      "problemMatcher": []
+    },
+    {
+      "label": "test:full-suite",
+      "type": "shell",
+      "command": "echo '✅ Full test suite completed'",
+      "dependsOn": ["test:lifecycle", "test:failures", "test:concurrency", "test:resources"],
+      "dependsOrder": "sequence",
+      "group": "test",
+      "problemMatcher": []
+    },
+    {
+      "label": "test:ci",
+      "type": "shell",
+      "command": "echo '🚀 CI test pipeline completed'",
+      "dependsOn": ["compile", "test:lint", "test:all"],
+      "dependsOrder": "sequence",
+      "group": "test",
+      "problemMatcher": []
     }
   ]
 }

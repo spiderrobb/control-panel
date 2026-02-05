@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import Button from '@mui/material/Button';
 import IconButton from '@mui/material/IconButton';
 import Tooltip from '@mui/material/Tooltip';
@@ -25,7 +25,7 @@ function RunningTasksPanel({ runningTasks, onStop, onFocus, onOpenDefinition, on
   }
 
   // Filter to only show root-level tasks (those without a parent)
-  const rootTasks = runningTasksList.filter(([label, state]) => !state.parentTask);
+  const rootTasks = runningTasksList.filter(([_label, state]) => !state.parentTask);
 
   const getLevelColor = (level) => {
     switch (level) {
@@ -177,23 +177,6 @@ function RunningTaskItem({ label, state, onStop, onFocus, onOpenDefinition, onDi
       return `${minutes}m ${seconds % 60}s`;
     }
     return `${seconds}s`;
-  };
-
-  const getBackgroundClass = () => {
-    if (isStopping) return 'bg-stopping';
-    if (isFailed) return 'error';
-    if (runtime > 60000) return 'bg-solid';
-    if (isFirstRun || !avgDuration) return 'bg-stripes';
-    return 'bg-progress';
-  };
-
-  const getProgressStyle = () => {
-    if (isFirstRun || !avgDuration || runtime > 60000) {
-      return {};
-    }
-    return {
-      '--progress': `${progress}%`
-    };
   };
 
   return (

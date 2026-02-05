@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { evaluate } from '@mdx-js/mdx';
 import * as runtime from 'react/jsx-runtime';
 import DescriptionIcon from '@mui/icons-material/Description';
@@ -52,7 +52,7 @@ function App() {
         case 'taskStarted':
           setRunningTasks(prev => {
             // Check if this task is already a subtask of another running task
-            const parentEntry = Object.entries(prev).find(([parentLabel, state]) => 
+            const parentEntry = Object.entries(prev).find(([_parentLabel, state]) => 
               state.subtasks?.includes(message.taskLabel)
             );
             

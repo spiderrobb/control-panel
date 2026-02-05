@@ -1,0 +1,180 @@
+# Testing Index & Quick Reference
+
+Complete testing documentation and task reference for the ControlPanel extension.
+
+## 📚 Testing Documentation
+
+### Core Guides
+- **[Testing Overview](testing.mdx)** - Comprehensive testing strategy and categories
+- **[Test Workflow](test-workflow.mdx)** - Developer workflows and daily testing tasks
+- **[Debugging Guide](debugging.mdx)** - Bug testing and troubleshooting procedures
+
+### Quick Access
+- **[Getting Started](getting-started.mdx)** - Main documentation with testing tasks
+- **[Error Scenarios](error-scenarios.mdx)** - Error handling examples
+- **[Development Workflow](development.mdx)** - General development tasks
+
+## 🚀 Quick Start Testing
+
+### First Time Setup
+<TaskLink label="test:validate" />
+Validate your testing environment.
+
+### Daily Development
+<TaskLink label="test:quick-suite" />
+Quick validation before starting work.
+
+### Pre-Commit
+<TaskLink label="test:full-suite" />
+Complete validation before committing.
+
+### Release Preparation  
+<TaskLink label="test:ci" />
+Full CI pipeline including build and test.
+
+## 🧪 Test Categories
+
+### Core Functionality
+| Test Suite | Command | Focus Area |
+|------------|---------|------------|
+| **Lifecycle** | <TaskLink label="test:lifecycle" /> | State transitions, cleanup |
+| **Failures** | <TaskLink label="test:failures" /> | Error handling, recovery |
+| **Concurrency** | <TaskLink label="test:concurrency" /> | Race conditions, parallel ops |
+| **Resources** | <TaskLink label="test:resources" /> | Memory, terminals, cleanup |
+| **Stress** | <TaskLink label="test:stress" /> | Performance, load testing |
+
+### Code Quality
+| Task | Command | Purpose |
+|------|---------|---------|
+| **Linting** | <TaskLink label="test:lint" /> | Code style validation |
+| **All Tests** | <TaskLink label="test:all" /> | Complete test execution |
+
+## 🔧 Development Tasks
+
+### Build Pipeline
+| Task | Command | Description |
+|------|---------|-------------|
+| **Compile** | <TaskLink label="compile" /> | Development build |
+| **Build** | <TaskLink label="build" /> | Production build |
+| **Watch** | <TaskLink label="watch" /> | Continuous compilation |
+
+### Test Infrastructure
+| Task | Command | Purpose |
+|------|---------|---------|
+| **Validate** | <TaskLink label="test:validate" /> | Infrastructure check |
+| **Quick Suite** | <TaskLink label="test:quick-suite" /> | Fast validation |
+| **Full Suite** | <TaskLink label="test:full-suite" /> | Complete testing |
+| **CI Pipeline** | <TaskLink label="test:ci" /> | Full CI/CD validation |
+
+## 🐛 Bug Testing Tasks
+
+### Failure Simulation
+| Scenario | Command | Tests |
+|----------|---------|-------|
+| **Exit Code 1** | <TaskLink label="fail:exit1" /> | Standard failure handling |
+| **Exit Code 2** | <TaskLink label="fail:exit2" /> | Shell misuse handling |
+| **Exit Code 127** | <TaskLink label="fail:exit127" /> | Command not found |
+| **Timeout** | <TaskLink label="fail:timeout" /> | Long-running task handling |
+
+### Framework Testing
+| Framework | Command | Purpose |
+|-----------|---------|---------|
+| **Python** | <TaskLink label="fail:pytest" /> | Pytest integration testing |
+| **JavaScript** | <TaskLink label="fail:jest" /> | Jest integration testing |
+
+### Dependency Testing  
+| Pattern | Command | Tests |
+|---------|---------|-------|
+| **Sequential** | <TaskLink label="fail:sequential-pipeline" /> | Chain failure propagation |
+| **Parallel** | <TaskLink label="fail:parallel-checks" /> | Mixed parallel results |
+| **Nested** | <TaskLink label="fail:nested-parent" /> | Complex dependency chains |
+
+## 📊 Testing Workflows
+
+### Bug Investigation Workflow
+1. **Reproduce**: Use relevant failure task
+2. **Isolate**: Run specific test category
+3. **Debug**: Use debugging guide procedures
+4. **Validate**: Run full test suite after fix
+
+### Performance Testing Workflow  
+1. **Baseline**: <TaskLink label="test:stress" />
+2. **Load Test**: <TaskLink label="test:concurrency" />
+3. **Resource Check**: <TaskLink label="test:resources" />
+4. **Validate**: <TaskLink label="test:ci" />
+
+### Pre-Release Workflow
+1. **Build**: <TaskLink label="compile" />
+2. **Quality**: <TaskLink label="test:lint" />
+3. **Function**: <TaskLink label="test:full-suite" />
+4. **Performance**: <TaskLink label="test:stress" />
+5. **CI**: <TaskLink label="test:ci" />
+
+## 🎯 Common Testing Scenarios
+
+### Memory Leak Investigation
+```
+1. Run: test:resources
+2. Check: State map cleanup
+3. Monitor: Terminal accumulation
+4. Validate: Extended operation stability
+```
+
+### Race Condition Debugging
+```  
+1. Run: test:concurrency
+2. Check: State consistency
+3. Test: Rapid operations
+4. Validate: No stuck states
+```
+
+### Failure Handling Verification
+```
+1. Run: test:failures
+2. Check: Error propagation
+3. Test: Recovery mechanisms
+4. Validate: User feedback
+```
+
+## 📋 Testing Checklists
+
+### ✅ Daily Development
+- [ ] <TaskLink label="test:validate" /> - Environment check
+- [ ] <TaskLink label="compile" /> - Code compilation
+- [ ] <TaskLink label="test:lint" /> - Style validation
+- [ ] Relevant test category for changes
+
+### ✅ Pre-Commit
+- [ ] <TaskLink label="test:full-suite" /> - All tests pass
+- [ ] <TaskLink label="test:lint" /> - Clean linting
+- [ ] <TaskLink label="test:resources" /> - No memory leaks
+- [ ] Code review complete
+
+### ✅ Release Preparation
+- [ ] <TaskLink label="test:ci" /> - CI pipeline success
+- [ ] <TaskLink label="test:stress" /> - Performance acceptable
+- [ ] All known bugs documented
+- [ ] Release notes updated
+
+## 🛟 Getting Help
+
+### Test Failures
+1. Check test output for specific errors
+2. Run <TaskLink label="test:validate" /> for infrastructure issues
+3. Review [Debugging Guide](debugging.mdx) for troubleshooting
+4. Check individual test categories to isolate problems
+
+### Performance Issues
+1. Run <TaskLink label="test:stress" /> for baseline
+2. Monitor memory with <TaskLink label="test:resources" />
+3. Check concurrency with <TaskLink label="test:concurrency" />
+
+### Infrastructure Problems
+1. Run <TaskLink label="test:validate" /> for diagnosis
+2. Check VS Code extension logs
+3. Verify test dependencies installed
+4. Review test configuration files
+
+---
+
+**📖 Complete Documentation:** [Testing Overview](testing.mdx) | [Test Workflows](test-workflow.mdx) | [Debugging Guide](debugging.mdx)

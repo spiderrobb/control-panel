@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import IconButton from '@mui/material/IconButton';
 import Tooltip from '@mui/material/Tooltip';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
@@ -10,7 +10,6 @@ import FiberManualRecordIcon from '@mui/icons-material/FiberManualRecord';
 import PauseIcon from '@mui/icons-material/Pause';
 
 function TaskLink({ label, onRun, onStop, onFocus, onOpenDefinition, taskState, allRunningTasks, starredTasks, onToggleStar }) {
-  const [isHovered, setIsHovered] = useState(false);
   const [runtime, setRuntime] = useState(0);
   const [progress, setProgress] = useState(0);
 

@@ -1,0 +1,262 @@
+# Test Runner & Development Workflow
+
+This page provides practical workflows for developers working on the ControlPanel extension, with direct access to all testing tools and development tasks.
+
+## 🚀 Development Quick Start
+
+### Initial Setup
+
+<TaskLink label="test:validate" />
+
+Always run this first to ensure your test environment is properly configured.
+
+### Daily Development Workflow
+
+1. **Start Development Session**
+   <TaskLink label="compile" />
+   
+   Compile the extension for development.
+
+2. **Run Quick Checks**  
+   <TaskLink label="test:quick-suite" />
+   
+   Validates test infrastructure and runs linting.
+
+3. **Develop & Test Iteratively**
+   - Make changes to code
+   - <TaskLink label="compile" /> - Recompile
+   - <TaskLink label="test:lifecycle" /> - Test core functionality
+   - <TaskLink label="test:failures" /> - Test error handling
+
+4. **Pre-Commit Validation**
+   <TaskLink label="test:full-suite" />
+   
+   Run all tests before committing changes.
+
+## 🧪 Test Categories & Tasks
+
+### Core Process Testing
+
+<TaskLink label="test:lifecycle" />
+
+**Tests:** Task state transitions, startup/shutdown sequences, resource cleanup
+
+**Run When:** After changes to task execution, state management, or process handling
+
+---
+
+<TaskLink label="test:failures" />
+
+**Tests:** Error handling, exit codes, dependency failures, timeout management
+
+**Run When:** After changes to error handling, task termination, or failure recovery
+
+---
+
+<TaskLink label="test:concurrency" />
+
+**Tests:** Race conditions, parallel execution, state consistency under load
+
+**Run When:** After changes to concurrent operations or shared state management
+
+---
+
+<TaskLink label="test:resources" />
+
+**Tests:** Memory leaks, terminal cleanup, event listener management
+
+**Run When:** After changes to resource allocation, cleanup routines, or extension lifecycle
+
+---
+
+<TaskLink label="test:stress" />
+
+**Tests:** High-load scenarios, performance limits, extended operation
+
+**Run When:** Before releases, after performance optimizations, or when investigating stability issues
+
+## 🔧 Build & Development Tasks
+
+### Build Pipeline
+
+<TaskLink label="build" />
+
+Production build with optimizations.
+
+<TaskLink label="compile" />
+
+Development build for testing and debugging.
+
+<TaskLink label="watch" />
+
+Continuous compilation during development.
+
+### Code Quality
+
+<TaskLink label="test:lint" />
+
+ESLint validation for code standards.
+
+<TaskLink label="lint" />
+
+Standard linting task (if different configuration).
+
+## 🚦 CI/CD Pipeline
+
+<TaskLink label="test:ci" />
+
+**Complete CI pipeline including:**
+- Code compilation
+- Linting validation  
+- Full test suite execution
+
+**Use for:** Pre-merge validation, release preparation
+
+## 🐛 Debugging & Troubleshooting
+
+### Test Infrastructure Issues
+
+<TaskLink label="test:validate" />
+
+**Validates:**
+- Test file structure
+- Required dependencies
+- Configuration files
+- Mock task availability
+
+**Run when:** Tests won't start, missing dependencies, or infrastructure problems
+
+### Specific Problem Areas
+
+**Process Management Issues:**
+<TaskLink label="test:lifecycle" />
+
+**Error Handling Problems:**  
+<TaskLink label="test:failures" />
+
+**Performance/Memory Issues:**
+<TaskLink label="test:resources" />
+<TaskLink label="test:stress" />
+
+**Race Conditions:**
+<TaskLink label="test:concurrency" />
+
+## 🎯 Test Scenarios Library
+
+### Basic Task Testing
+
+<TaskLink label="fail:exit1" />
+Simple failure with exit code 1.
+
+<TaskLink label="fail:exit2" />
+Shell command misuse simulation.
+
+<TaskLink label="fail:exit127" />
+Command not found error.
+
+<TaskLink label="fail:timeout" />
+Long-running task for timeout testing.
+
+### Framework Testing  
+
+<TaskLink label="fail:pytest" />
+Python test framework failure simulation.
+
+<TaskLink label="fail:jest" />
+JavaScript test framework failure simulation.
+
+### Dependency Testing
+
+<TaskLink label="fail:sequential-pipeline" />
+Sequential dependency chain failure.
+
+<TaskLink label="fail:parallel-checks" />
+Parallel task execution with mixed results.
+
+<TaskLink label="fail:nested-parent" />
+Complex nested dependency failure propagation.
+
+## 📊 Performance Monitoring
+
+### Quick Performance Check
+
+<TaskLink label="test:concurrency" />
+
+Includes load testing and performance metrics.
+
+### Extended Stress Testing
+
+<TaskLink label="test:stress" />
+
+**Monitors:**
+- Memory usage over time
+- Terminal resource allocation
+- State map growth
+- Performance degradation
+
+## 🔍 Test Results Interpretation
+
+### Success Indicators
+- ✅ All tests pass
+- ✅ Memory usage remains stable
+- ✅ No resource leaks detected
+- ✅ Performance within expected bounds
+
+### Warning Signs
+- ⚠️ Increasing memory usage
+- ⚠️ Test timeouts
+- ⚠️ Inconsistent state transitions
+- ⚠️ Terminal accumulation
+
+### Critical Issues
+- ❌ Race condition failures
+- ❌ Memory leak detection
+- ❌ Incomplete cleanup
+- ❌ State corruption
+
+## 📋 Test Checklists
+
+### Before Starting Development
+- [ ] <TaskLink label="test:validate" /> passes
+- [ ] <TaskLink label="compile" /> succeeds
+- [ ] <TaskLink label="test:lint" /> passes
+
+### During Development  
+- [ ] <TaskLink label="compile" /> after each change
+- [ ] Relevant test category runs clean
+- [ ] No new linting errors
+
+### Before Committing
+- [ ] <TaskLink label="test:full-suite" /> passes
+- [ ] <TaskLink label="test:lint" /> clean
+- [ ] No memory leaks in <TaskLink label="test:resources" />
+
+### Release Preparation
+- [ ] <TaskLink label="test:ci" /> complete success
+- [ ] <TaskLink label="test:stress" /> performance acceptable
+- [ ] All known bugs documented
+
+## 🛠️ Maintenance Tasks
+
+### Weekly Maintenance
+
+<TaskLink label="test:full-suite" />
+
+Ensure all tests remain functional.
+
+### Pre-Release Testing
+
+<TaskLink label="test:ci" />
+<TaskLink label="test:stress" />
+
+Complete validation before release.
+
+### Performance Baseline
+
+<TaskLink label="test:stress" />
+
+Establish performance benchmarks for regression testing.
+
+---
+
+**Next:** [Error Scenarios](error-scenarios.mdx) | **Previous:** [Testing Overview](testing.mdx)

@@ -1,0 +1,279 @@
+# Bug Testing & Debugging Guide
+
+This guide covers how to test for and debug the specific bugs identified in the ControlPanel extension, with direct access to testing tools and validation tasks.
+
+## 🐛 Critical Bug Testing
+
+### 1. Race Condition in Task Stopping
+
+**Issue:** Tasks can get stuck in "stopping" state due to concurrent operations.
+
+**Test Commands:**
+<TaskLink label="test:concurrency" />
+
+**Manual Testing:**
+1. Start a long-running task: <TaskLink label="fail:timeout" />
+2. Rapidly stop and restart the task multiple times
+3. Check for tasks stuck in "stopping" state
+
+**Validation:** 
+- No tasks remain in "stopping" state after operations
+- `_stoppingTasks` Set is properly cleaned up
+
+---
+
+### 2. Memory Leaks in State Maps
+
+**Issue:** State maps accumulate entries without proper cleanup.
+
+**Test Commands:**
+<TaskLink label="test:resources" />
+
+**Manual Testing:**
+1. Run multiple tasks: <TaskLink label="test:full-suite" />  
+2. Monitor extension memory usage over time
+3. Check for growing state map sizes
+
+**Validation:**
+- Memory usage remains stable
+- State maps are cleaned up after task completion
+
+---
+
+### 3. Missing Circular Dependency Detection
+
+**Issue:** No protection against circular task dependencies.
+
+**Test Commands:**
+<TaskLink label="test:failures" />
+
+**Manual Testing:**
+Try to create tasks with circular dependencies and verify they don't cause infinite loops.
+
+**Validation:**
+- Circular dependencies are detected and prevented
+- System remains responsive with complex dependency chains
+
+---
+
+### 4. Inconsistent Task State Management
+
+**Issue:** Task states can become inconsistent during concurrent operations.
+
+**Test Commands:**
+<TaskLink label="test:concurrency" />
+<TaskLink label="test:lifecycle" />
+
+**Manual Testing:**
+1. Start multiple tasks simultaneously
+2. Monitor state consistency across operations
+3. Verify state transitions are atomic
+
+**Validation:**
+- Task states remain consistent
+- No orphaned or contradictory states
+
+## 🔍 Debugging Specific Scenarios
+
+### Terminal Resource Leaks
+
+**Test:** <TaskLink label="test:resources" />
+
+**Debug Steps:**
+1. Count initial terminals
+2. Run failing tasks: <TaskLink label="fail:exit1" />
+3. Verify terminal cleanup after failure
+
+**Expected:** No terminal accumulation over time
+
+---
+
+### Webview Message Buffer Overflow
+
+**Test:** <TaskLink label="test:concurrency" />
+
+**Debug Steps:**
+1. Start many tasks rapidly
+2. Monitor webview responsiveness
+3. Check for message queue buildup
+
+**Expected:** Webview remains responsive under load
+
+---
+
+### Global State Corruption
+
+**Test:** <TaskLink label="test:resources" />
+
+**Debug Steps:**
+1. Run concurrent state-modifying operations
+2. Verify state consistency after operations
+3. Check for data corruption in persistence
+
+**Expected:** State remains consistent and uncorrupted
+
+## 🧪 Failure Scenario Testing
+
+### Exit Code Testing
+
+<TaskLink label="fail:exit1" />
+Test exit code 1 handling and error propagation.
+
+<TaskLink label="fail:exit2" />  
+Test exit code 2 (misuse) handling.
+
+<TaskLink label="fail:exit127" />
+Test command not found handling.
+
+### Framework Integration Testing
+
+<TaskLink label="fail:pytest" />
+Test Python testing framework integration and failure handling.
+
+<TaskLink label="fail:jest" />
+Test JavaScript testing framework integration.
+
+### Dependency Chain Testing
+
+<TaskLink label="fail:sequential-pipeline" />
+Test sequential dependency failure propagation.
+
+<TaskLink label="fail:parallel-checks" />
+Test parallel dependency mixed results.
+
+<TaskLink label="fail:nested-parent" />
+Test complex nested dependency chains.
+
+### Timeout & Long-Running Testing
+
+<TaskLink label="fail:timeout" />
+Test timeout handling and termination.
+
+<TaskLink label="fail:background-crash" />
+Test background task crash handling.
+
+## 🔧 Debug Workflow
+
+### Step 1: Reproduce the Issue
+
+Use the appropriate test task to reproduce the specific issue:
+
+- **Process issues:** <TaskLink label="test:lifecycle" />
+- **Memory issues:** <TaskLink label="test:resources" />  
+- **Race conditions:** <TaskLink label="test:concurrency" />
+- **Failure handling:** <TaskLink label="test:failures" />
+
+### Step 2: Isolate the Problem
+
+Run individual test categories to narrow down the issue area.
+
+### Step 3: Validate Fix
+
+After implementing fixes, run the full test suite:
+<TaskLink label="test:ci" />
+
+## 📊 Performance Debugging
+
+### Memory Usage Analysis
+
+<TaskLink label="test:stress" />
+
+**Monitors:**
+- Heap memory growth
+- RSS memory usage  
+- State map sizes
+- Event listener counts
+
+**Look For:**
+- Continuous memory growth
+- Unbounded state accumulation
+- Resource leaks
+
+### Performance Regression Testing
+
+<TaskLink label="test:concurrency" />
+
+**Measures:**
+- Task execution times
+- Concurrent operation performance
+- System responsiveness under load
+
+**Look For:**
+- Degrading performance over time
+- Excessive operation delays
+- System unresponsiveness
+
+## 🛡️ Prevention Testing
+
+### Regression Prevention
+
+<TaskLink label="test:full-suite" />
+
+Run complete test suite to prevent regression of fixed bugs.
+
+### Continuous Validation
+
+<TaskLink label="test:ci" />
+
+Automated testing pipeline for ongoing validation.
+
+## 📋 Bug Verification Checklist
+
+### Race Condition Fixes
+- [ ] Tasks transition states atomically
+- [ ] No tasks stuck in "stopping" state
+- [ ] Concurrent operations handle properly
+- [ ] `_stoppingTasks` Set cleaned up
+
+### Memory Leak Fixes  
+- [ ] State maps cleaned up after task completion
+- [ ] Memory usage remains stable over time
+- [ ] No terminal accumulation
+- [ ] Event listeners properly disposed
+
+### State Management Fixes
+- [ ] Task states remain consistent
+- [ ] State transitions validated
+- [ ] No orphaned state entries
+- [ ] Persistence works correctly
+
+### Error Handling Fixes
+- [ ] Exit codes handled appropriately
+- [ ] Error propagation works correctly
+- [ ] Recovery mechanisms function
+- [ ] User feedback is appropriate
+
+## 🎯 Testing Priorities
+
+### Critical (Must Test First)
+1. <TaskLink label="test:concurrency" /> - Race conditions
+2. <TaskLink label="test:resources" /> - Memory leaks  
+3. <TaskLink label="test:lifecycle" /> - State management
+
+### High Priority  
+1. <TaskLink label="test:failures" /> - Error handling
+2. <TaskLink label="test:stress" /> - Performance
+
+### Ongoing Monitoring
+1. <TaskLink label="test:ci" /> - Regular validation
+2. <TaskLink label="test:validate" /> - Infrastructure health
+
+## 🚨 Known Issue Workarounds
+
+While bugs are being fixed, use these workarounds:
+
+### Race Condition Mitigation
+- Avoid rapid start/stop cycles
+- Allow tasks to fully complete before stopping
+
+### Memory Management
+- Restart extension periodically during heavy development
+- Monitor memory usage in long sessions
+
+### State Consistency
+- Verify task state before performing operations
+- Use task status indicators for validation
+
+---
+
+**Next:** [Performance Testing](test-workflow.mdx) | **Previous:** [Testing Overview](testing.mdx)
