@@ -1,6 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useContext } from 'react';
 import IconButton from '@mui/material/IconButton';
 import Tooltip from '@mui/material/Tooltip';
+import Popover from '@mui/material/Popover';
+import Typography from '@mui/material/Typography';
+import Box from '@mui/material/Box';
+import Chip from '@mui/material/Chip';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import StopIcon from '@mui/icons-material/Stop';
 import BoltIcon from '@mui/icons-material/Bolt';
@@ -9,10 +13,65 @@ import StarBorderIcon from '@mui/icons-material/StarBorder';
 import FiberManualRecordIcon from '@mui/icons-material/FiberManualRecord';
 import PauseIcon from '@mui/icons-material/Pause';
 
-function TaskLink({ label, onRun, onStop, onFocus, onOpenDefinition, taskState, allRunningTasks, dependencySegments = [], dependsOrder, starredTasks, onToggleStar }) {
+// Define 10 VS Code theme colors for npm path color-coding
+const NPM_CHIP_COLORS = [
+  'var(--vscode-charts-blue)',
+  'var(--vscode-charts-green)',
+  'var(--vscode-charts-orange)',
+  'var(--vscode-charts-purple)',
+  'var(--vscode-charts-yellow)',
+  'var(--vscode-charts-red)',
+  'var(--vscode-charts-cyan)',
+  'var(--vscode-charts-pink)',
+  'var(--vscode-terminal-ansiMagenta)',
+  'var(--vscode-terminal-ansiBrightBlue)'
+];
+
+// Normalize npm path for consistent color assignment
+const normalizePath = (path) => {
+  if (!path) return '';
+  return path.trim().toLowerCase().replace(/^\.\//, '');
+};
+
+function TaskLink({ label, taskId, displayLabel, onRun, onStop, onFocus, onOpenDefinition, taskState, allRunningTasks, dependencySegments = [], dependsOrder, tasks = [], starredTasks, onToggleStar, npmPathColorMap, setNpmPathColorMap }) {
   const [runtime, setRuntime] = useState(0);
   const [progress, setProgress] = useState(0);
   const [segmentTick, setSegmentTick] = useState(0);
+  const [popoverAnchor, setPopoverAnchor] = useState(null);
+  const [popoverContent, setPopoverContent] = useState(null);
+  
+  // Get current task info - prefer ID if available
+  const currentTask = taskId 
+    ? tasks.find(t => t.id === taskId) 
+    : tasks.find(t => t.label === label);
+    
+  const isNpmTask = currentTask?.source === 'npm';
+  const npmPath = currentTask?.definition?.path;
+  const scriptName = currentTask?.definition?.script;
+  
+  // For npm tasks, use script name from definition, otherwise use displayLabel/label
+  const displayText = isNpmTask && scriptName ? scriptName : (displayLabel || label);
+  
+  // Get or assign color for npm path
+  const getNpmColor = (path) => {
+    if (!path) return NPM_CHIP_COLORS[0];
+    const normalized = normalizePath(path);
+    
+    if (npmPathColorMap && npmPathColorMap[normalized]) {
+      return npmPathColorMap[normalized];
+    }
+    
+    // Assign new color
+    if (setNpmPathColorMap) {
+      const assignedColors = Object.values(npmPathColorMap || {});
+      const nextColorIndex = assignedColors.length % NPM_CHIP_COLORS.length;
+      const newColor = NPM_CHIP_COLORS[nextColorIndex];
+      setNpmPathColorMap(prev => ({ ...prev, [normalized]: newColor }));
+      return newColor;
+    }
+    
+    return NPM_CHIP_COLORS[0];
+  };
 
   const isRunning = taskState?.running || false;
   const isFailed = taskState?.failed || false;
@@ -161,20 +220,109 @@ function TaskLink({ label, onRun, onStop, onFocus, onOpenDefinition, taskState, 
     return { progress: progressValue, indeterminate: false };
   };
 
+  const getTaskInfo = (taskLabel) => {
+    const taskData = tasks?.find(t => t.id === taskLabel || t.label === taskLabel);
+    
+    // Helper to determine source file
+    const getSourceFile = (task) => {
+      if (task?.source === 'npm' && task?.definition?.path) {
+        return `${task.definition.path}/package.json`;
+      }
+      return 'tasks.json';
+    };
+    
+    if (taskLabel === label || taskLabel === taskId) {
+      return {
+        name: label,
+        source: taskData?.source,
+        sourceFile: getSourceFile(taskData),
+        script: taskData?.detail || 'No script defined',
+        status: isFailed ? 'failed' : (isRunning ? 'running' : 'idle'),
+        duration: runtime,
+        progress: progress,
+        exitCode: exitCode,
+        failureReason: failureReason
+      };
+    }
+    const segmentState = allRunningTasks?.[taskLabel];
+    const segmentTaskData = tasks?.find(t => t.id === taskLabel || t.label === taskLabel);
+    return {
+      name: segmentTaskData?.label || taskLabel,
+      source: segmentTaskData?.source || 'unknown',
+      sourceFile: getSourceFile(segmentTaskData),
+      script: segmentTaskData?.detail || 'No script defined',
+      status: segmentState?.failed ? 'failed' : (segmentState?.running ? 'running' : 'idle'),
+      duration: segmentState?.startTime ? Date.now() - segmentState.startTime : 0,
+      exitCode: segmentState?.exitCode,
+      failureReason: segmentState?.failureReason
+    };
+  };
+
+  const handleSegmentHover = (event, taskLabel) => {
+    setPopoverAnchor(event.currentTarget);
+    setPopoverContent(getTaskInfo(taskLabel));
+  };
+
+  const handleSegmentLeave = () => {
+    setPopoverAnchor(null);
+    setPopoverContent(null);
+  };
+
+  const getDisplayLabel = (taskLabel) => {
+    const taskData = tasks?.find(t => t.id === taskLabel || t.label === taskLabel);
+    if (taskData?.source === 'npm' && taskData?.definition?.script) {
+      return taskData.definition.script;
+    }
+    return taskData?.displayLabel || taskLabel;
+  };
+  
+  const getTaskSource = (taskLabel) => {
+    const task = tasks?.find(t => t.id === taskLabel || t.label === taskLabel);
+    return task?.source;
+  };
+  
+  const getTaskNpmPath = (taskLabel) => {
+    const task = tasks?.find(t => t.id === taskLabel || t.label === taskLabel);
+    return task?.definition?.path;
+  };
+
   const renderSegment = (segmentLabel, state, isParent = false, style = undefined) => {
     const progressInfo = getSegmentProgressInfo(segmentLabel, state);
+    const segmentDisplayLabel = isParent ? displayText : getDisplayLabel(segmentLabel);
+    const segmentSource = isParent ? currentTask?.source : getTaskSource(segmentLabel);
+    const segmentNpmPath = isParent ? npmPath : getTaskNpmPath(segmentLabel);
+    const segmentIsNpm = segmentSource === 'npm';
+    
     return (
       <span
         key={segmentLabel}
         className={`task-segment segment-${state} ${isParent ? 'segment-parent' : 'segment-child'} ${progressInfo.indeterminate ? 'segment-indeterminate' : ''}`}
         onDoubleClick={() => onOpenDefinition(segmentLabel)}
-        title={isParent ? `Task: ${segmentLabel} (double-click to open)` : `Dependency: ${segmentLabel} (double-click to open)`}
+        onMouseEnter={(e) => handleSegmentHover(e, segmentLabel)}
+        onMouseLeave={handleSegmentLeave}
         style={{
           ...style,
           '--segment-progress': `${progressInfo.progress}%`
         }}
       >
-        {segmentLabel}
+        {segmentIsNpm && (
+          <Chip
+            label="npm"
+            size="small"
+            sx={{
+              height: 18,
+              fontSize: '10px',
+              fontWeight: 600,
+              marginRight: '6px',
+              backgroundColor: getNpmColor(segmentNpmPath),
+              color: 'var(--vscode-button-foreground)',
+              '& .MuiChip-label': {
+                padding: '0 6px'
+              }
+            }}
+          />
+        )}
+        {segmentDisplayLabel}
         <span className={`segment-timer ${progressInfo.indeterminate ? 'segment-timer-indeterminate' : ''}`} />
       </span>
     );
@@ -208,10 +356,27 @@ function TaskLink({ label, onRun, onStop, onFocus, onOpenDefinition, taskState, 
       return (
         <span
           className="task-label"
-          onDoubleClick={() => onOpenDefinition(label)}
+          onDoubleClick={() => onOpenDefinition(taskId || label)}
           title="Double-click to open task definition in tasks.json"
         >
-          {label}
+          {isNpmTask && (
+            <Chip
+              label="npm"
+              size="small"
+              sx={{
+                height: 18,
+                fontSize: '10px',
+                fontWeight: 600,
+                marginRight: '6px',
+                backgroundColor: getNpmColor(npmPath),
+                color: 'var(--vscode-button-foreground)',
+                '& .MuiChip-label': {
+                  padding: '0 6px'
+                }
+              }}
+            />
+          )}
+          {displayText}
         </span>
       );
     }
@@ -227,24 +392,24 @@ function TaskLink({ label, onRun, onStop, onFocus, onOpenDefinition, taskState, 
     const hasSubtasks = subtasks.length > 0 && !hasDependencies;
     
     return (
-      <div className={`task-link running ${hasSubtasks ? 'with-subtasks' : ''}`}>
-        <div 
-          className={`task-pill ${hasDependencies ? getParentBackgroundClass() : getBackgroundClass()}`} 
-          style={getProgressStyle()}
-          title={isFailed 
-            ? `Failed: ${failureReason || 'Task failed'} (exit code: ${exitCode})`
-            : `Running for ${formatRuntime(runtime)}${avgDuration && !isFirstRun ? ` • ${Math.floor(progress)}% complete` : ''}`}
-        >
-          <Tooltip title={starredTasks?.includes(label) ? 'Remove from starred tasks' : 'Add to starred tasks'}>
+      <>
+        <div className={`task-link running ${hasSubtasks ? 'with-subtasks' : ''}`}>
+          <div 
+            className={`task-pill ${hasDependencies ? getParentBackgroundClass() : getBackgroundClass()}`} 
+            style={getProgressStyle()}
+            onMouseEnter={(e) => handleSegmentHover(e, taskId || label)}
+            onMouseLeave={handleSegmentLeave}
+          >
+          <Tooltip title={starredTasks?.includes(taskId || label) ? 'Remove from starred tasks' : 'Add to starred tasks'}>
             <IconButton
               size="small"
               onClick={(e) => {
                 e.stopPropagation();
-                onToggleStar?.(label);
+                onToggleStar?.(taskId || label);
               }}
               sx={{ p: 0.5, color: 'inherit' }}
             >
-              {starredTasks?.includes(label) ? <StarIcon sx={{ fontSize: 16 }} /> : <StarBorderIcon sx={{ fontSize: 16 }} />}
+              {starredTasks?.includes(taskId || label) ? <StarIcon sx={{ fontSize: 16 }} /> : <StarBorderIcon sx={{ fontSize: 16 }} />}
             </IconButton>
           </Tooltip>
           {renderCompositeSegments()}
@@ -254,14 +419,14 @@ function TaskLink({ label, onRun, onStop, onFocus, onOpenDefinition, taskState, 
                 Failed {exitCode !== undefined ? `(${exitCode})` : ''}
               </span>
               {failedDependency && (
-                <span className="dependency-error" title={`Dependency "${failedDependency}" failed`}>
-                  ← {failedDependency}
+                <span className="dependency-error" title={`Dependency "${getDisplayLabel(failedDependency)}" failed`}>
+                  ← {getDisplayLabel(failedDependency)}
                 </span>
               )}
               <Tooltip title="Retry this task">
                 <IconButton
                   size="small"
-                  onClick={() => onRun(label)}
+                  onClick={() => onRun(taskId || label)}
                   sx={{ p: 0.5, ml: 0.5 }}
                 >
                   <PlayArrowIcon sx={{ fontSize: 16 }} />
@@ -275,7 +440,7 @@ function TaskLink({ label, onRun, onStop, onFocus, onOpenDefinition, taskState, 
                 <span>
                   <IconButton
                     size="small"
-                    onClick={() => onFocus(label)}
+                    onClick={() => onFocus(taskId || label)}
                     disabled={!canFocus}
                     sx={{ p: 0.5, ml: 0.5 }}
                   >
@@ -287,7 +452,7 @@ function TaskLink({ label, onRun, onStop, onFocus, onOpenDefinition, taskState, 
                 <span>
                   <IconButton
                     size="small"
-                    onClick={() => onStop(label)}
+                    onClick={() => onStop(taskId || label)}
                     disabled={!canStop}
                     sx={{ p: 0.5 }}
                   >
@@ -318,29 +483,90 @@ function TaskLink({ label, onRun, onStop, onFocus, onOpenDefinition, taskState, 
           </div>
         )}
       </div>
+      {popoverAnchor && popoverContent && (
+        <Popover
+          open={Boolean(popoverAnchor)}
+          anchorEl={popoverAnchor}
+          onClose={handleSegmentLeave}
+          anchorOrigin={{
+            vertical: 'bottom',
+            horizontal: 'center',
+          }}
+          transformOrigin={{
+            vertical: 'top',
+            horizontal: 'center',
+          }}
+          sx={{ pointerEvents: 'none' }}
+        >
+          <Box sx={{ p: 1.5, minWidth: 220 }}>
+            {popoverContent.sourceFile && (
+              <Typography variant="caption" sx={{ display: 'block', fontSize: '0.7rem', opacity: 0.6, mb: 0.5 }}>
+                {popoverContent.sourceFile}
+              </Typography>
+            )}
+            <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 0.5 }}>
+              {popoverContent.name}
+            </Typography>
+            {popoverContent.script && (
+              <Typography variant="caption" sx={{ display: 'block', opacity: 0.8, fontFamily: 'monospace', fontSize: '0.75rem', mb: 0.75 }}>
+                {popoverContent.script}
+              </Typography>
+            )}
+            <Typography variant="caption" sx={{ display: 'block', mb: 0.75, opacity: 0.8 }}>
+              Status: <span style={{ fontWeight: 500 }}>{popoverContent.status}</span>
+            </Typography>
+            {popoverContent.duration > 0 && (
+              <Typography variant="caption" sx={{ display: 'block', mb: 0.5, opacity: 0.8 }}>
+                Duration: <span style={{ fontWeight: 500 }}>{formatRuntime(popoverContent.duration)}</span>
+              </Typography>
+            )}
+            {popoverContent.progress > 0 && popoverContent.status === 'running' && (
+              <Typography variant="caption" sx={{ display: 'block', mb: 0.5, opacity: 0.8 }}>
+                Progress: <span style={{ fontWeight: 500 }}>{Math.floor(popoverContent.progress)}%</span>
+              </Typography>
+            )}
+            {popoverContent.failureReason && (
+              <Typography variant="caption" sx={{ display: 'block', color: 'error.main', mt: 0.75 }}>
+                {popoverContent.failureReason}
+              </Typography>
+            )}
+            {popoverContent.exitCode !== undefined && popoverContent.status === 'failed' && (
+              <Typography variant="caption" sx={{ display: 'block', opacity: 0.8 }}>
+                Exit Code: <span style={{ fontFamily: 'monospace' }}>{popoverContent.exitCode}</span>
+              </Typography>
+            )}
+          </Box>
+        </Popover>
+      )}
+    </>
     );
   }
 
   return (
-    <span className="task-link">
-      <span className="task-expanded" title={`Task: ${label}`}>
-        <Tooltip title={starredTasks?.includes(label) ? 'Remove from starred tasks' : 'Add to starred tasks'}>
+    <>
+      <span className="task-link">
+        <span
+          className="task-expanded"
+          onMouseEnter={(e) => handleSegmentHover(e, taskId || label)}
+          onMouseLeave={handleSegmentLeave}
+        >
+        <Tooltip title={starredTasks?.includes(taskId || label) ? 'Remove from starred tasks' : 'Add to starred tasks'}>
           <IconButton
             size="small"
             onClick={(e) => {
               e.stopPropagation();
-              onToggleStar?.(label);
+              onToggleStar?.(taskId || label);
             }}
             sx={{ p: 0.5, color: 'inherit' }}
           >
-            {starredTasks?.includes(label) ? <StarIcon sx={{ fontSize: 16 }} /> : <StarBorderIcon sx={{ fontSize: 16 }} />}
+            {starredTasks?.includes(taskId || label) ? <StarIcon sx={{ fontSize: 16 }} /> : <StarBorderIcon sx={{ fontSize: 16 }} />}
           </IconButton>
         </Tooltip>
         {renderCompositeSegments()}
         <Tooltip title="Run this task">
           <IconButton
             size="small"
-            onClick={() => onRun(label)}
+            onClick={() => onRun(taskId || label)}
             sx={{ p: 0.5, ml: 0.5 }}
           >
             <PlayArrowIcon sx={{ fontSize: 16 }} />
@@ -348,6 +574,62 @@ function TaskLink({ label, onRun, onStop, onFocus, onOpenDefinition, taskState, 
         </Tooltip>
       </span>
     </span>
+    {popoverAnchor && popoverContent && (
+      <Popover
+        open={Boolean(popoverAnchor)}
+        anchorEl={popoverAnchor}
+        onClose={handleSegmentLeave}
+        anchorOrigin={{
+          vertical: 'bottom',
+          horizontal: 'center',
+        }}
+        transformOrigin={{
+          vertical: 'top',
+          horizontal: 'center',
+        }}
+        sx={{ pointerEvents: 'none' }}
+      >
+        <Box sx={{ p: 1.5, minWidth: 220 }}>
+          {popoverContent.sourceFile && (
+            <Typography variant="caption" sx={{ display: 'block', fontSize: '0.7rem', opacity: 0.6, mb: 0.5 }}>
+              {popoverContent.sourceFile}
+            </Typography>
+          )}
+          <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 0.5 }}>
+            {popoverContent.name}
+          </Typography>
+          {popoverContent.script && (
+            <Typography variant="caption" sx={{ display: 'block', opacity: 0.8, fontFamily: 'monospace', fontSize: '0.75rem', mb: 0.75 }}>
+              {popoverContent.script}
+            </Typography>
+          )}
+          <Typography variant="caption" sx={{ display: 'block', mb: 0.75, opacity: 0.8 }}>
+            Status: <span style={{ fontWeight: 500 }}>{popoverContent.status}</span>
+          </Typography>
+          {popoverContent.duration > 0 && (
+            <Typography variant="caption" sx={{ display: 'block', mb: 0.5, opacity: 0.8 }}>
+              Duration: <span style={{ fontWeight: 500 }}>{formatRuntime(popoverContent.duration)}</span>
+            </Typography>
+          )}
+          {popoverContent.progress > 0 && popoverContent.status === 'running' && (
+            <Typography variant="caption" sx={{ display: 'block', mb: 0.5, opacity: 0.8 }}>
+              Progress: <span style={{ fontWeight: 500 }}>{Math.floor(popoverContent.progress)}%</span>
+            </Typography>
+          )}
+          {popoverContent.failureReason && (
+            <Typography variant="caption" sx={{ display: 'block', color: 'error.main', mt: 0.75 }}>
+              {popoverContent.failureReason}
+            </Typography>
+          )}
+          {popoverContent.exitCode !== undefined && popoverContent.status === 'failed' && (
+            <Typography variant="caption" sx={{ display: 'block', opacity: 0.8 }}>
+              Exit Code: <span style={{ fontFamily: 'monospace' }}>{popoverContent.exitCode}</span>
+            </Typography>
+          )}
+        </Box>
+      </Popover>
+    )}
+    </>
   );
 }
 

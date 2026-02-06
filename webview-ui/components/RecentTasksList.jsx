@@ -7,8 +7,13 @@ import StarBorderIcon from '@mui/icons-material/StarBorder';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 
-function RecentTasksList({ tasks, onRun, onToggleStar, starredTasks }) {
+function RecentTasksList({ tasks, allTasks, onRun, onToggleStar, starredTasks }) {
   const [isCollapsed, setIsCollapsed] = useState(false);
+  
+  const getDisplayLabel = (label) => {
+    const task = allTasks?.find(t => t.id === label || t.label === label);
+    return task?.displayLabel || label;
+  };
 
   return (
     <div className="recent-tasks-panel">
@@ -40,7 +45,7 @@ function RecentTasksList({ tasks, onRun, onToggleStar, starredTasks }) {
                     {starredTasks.includes(label) ? <StarIcon sx={{ fontSize: 16 }} /> : <StarBorderIcon sx={{ fontSize: 16 }} />}
                   </IconButton>
                 </Tooltip>
-                <span className="task-label">{label}</span>
+                <span className="task-label">{getDisplayLabel(label)}</span>
                 <Tooltip title="Run task">
                   <IconButton
                     size="small"

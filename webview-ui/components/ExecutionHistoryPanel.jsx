@@ -7,8 +7,13 @@ import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import ErrorIcon from '@mui/icons-material/Error';
 
-function ExecutionHistoryPanel({ history }) {
+function ExecutionHistoryPanel({ history, allTasks }) {
   const [expandedItems, setExpandedItems] = useState(new Set());
+  
+  const getDisplayLabel = (taskLabel) => {
+    const task = allTasks?.find(t => t.id === taskLabel || t.label === taskLabel);
+    return task?.displayLabel || taskLabel;
+  };
 
   const toggleExpanded = (id) => {
     setExpandedItems(prev => {
@@ -112,7 +117,7 @@ function ExecutionHistoryPanel({ history }) {
                 <CheckCircleIcon sx={{ fontSize: 16, mr: 0.5, color: 'var(--vscode-testing-iconPassed)' }} />
               )}
               
-              <span className="execution-label">{execution.taskLabel}</span>
+              <span className="execution-label">{getDisplayLabel(execution.taskLabel)}</span>
               
               {hasChildren && !isExpanded && (
                 <span className="child-count">

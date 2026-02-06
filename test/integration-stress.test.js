@@ -330,6 +330,27 @@ suite('Integration Stress Tests', () => {
       assert.ok(openSpy.firstCall.args[0].includes('tasks.json'));
     });
 
+    test('opens package.json for npm task in definition.path', async () => {
+      const packageJsonPath = path.join('/workspaces/ControlPanel', 'test-workspace', 'package.json');
+      const packageJsonContent = `{
+  "name": "test-workspace",
+  "scripts": {
+    "build": "echo building"
+  }
+}`;
+      stubFs(sandbox, { [packageJsonPath]: packageJsonContent });
+
+      const npmTask = new vscode.MockTask('build', 'npm', { path: 'test-workspace' });
+      vscode.tasks._registerTask(npmTask);
+
+      const openSpy = sandbox.spy(vscode.workspace, 'openTextDocument');
+      await provider.openTaskDefinition('build');
+
+      assert.ok(openSpy.calledOnce);
+      assert.ok(openSpy.firstCall.args[0].includes('test-workspace'));
+      assert.ok(openSpy.firstCall.args[0].includes('package.json'));
+    });
+
     test('shows info message when tasks.json not found', async () => {
       stubFs(sandbox, {}); // no files
       const spy = sandbox.spy(vscode.window, 'showInformationMessage');

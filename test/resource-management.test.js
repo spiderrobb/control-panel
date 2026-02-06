@@ -36,23 +36,23 @@ suite('Resource Management Tests', () => {
   suite('State Map Cleanup on Task Completion', () => {
     test('runningTasks is cleared after task ends', () => {
       provider.handleTaskStarted(createStartEvent('build'));
-      assert.ok(provider._runningTasks.has('build'));
+      assert.ok(provider._runningTasks.has('Workspace|build'));
       provider.handleTaskEnded(createEndEvent('build', 0));
-      assert.strictEqual(provider._runningTasks.has('build'), false);
+      assert.strictEqual(provider._runningTasks.has('Workspace|build'), false);
     });
 
     test('taskStartTimes is cleared after task ends', () => {
       provider.handleTaskStarted(createStartEvent('build'));
-      assert.ok(provider._taskStartTimes.has('build'));
+      assert.ok(provider._taskStartTimes.has('Workspace|build'));
       provider.handleTaskEnded(createEndEvent('build', 0));
-      assert.strictEqual(provider._taskStartTimes.has('build'), false);
+      assert.strictEqual(provider._taskStartTimes.has('Workspace|build'), false);
     });
 
     test('taskHierarchy is cleared after parent task ends', () => {
       provider.handleTaskStarted(createStartEvent('parent'));
-      provider.addSubtask('parent', 'child');
+      provider.addSubtask('Workspace|parent', 'Workspace|child');
       provider.handleTaskEnded(createEndEvent('parent', 0));
-      assert.strictEqual(provider._taskHierarchy.has('parent'), false);
+      assert.strictEqual(provider._taskHierarchy.has('Workspace|parent'), false);
     });
 
     test('multiple task start/end cycles leave no orphan state', () => {
@@ -67,9 +67,9 @@ suite('Resource Management Tests', () => {
 
     test('_taskStates entries are cleaned up after completion', () => {
       provider.handleTaskStarted(createStartEvent('build'));
-      assert.strictEqual(provider._taskStates.get('build'), 'running');
+      assert.strictEqual(provider._taskStates.get('Workspace|build'), 'running');
       provider.handleTaskEnded(createEndEvent('build', 0));
-      assert.strictEqual(provider._taskStates.has('build'), false);
+      assert.strictEqual(provider._taskStates.has('Workspace|build'), false);
     });
 
     test('_stoppingTasks is empty when no tasks are being stopped', () => {
@@ -79,10 +79,10 @@ suite('Resource Management Tests', () => {
     test('_stoppingTasks is cleaned after stopTask completes', async () => {
       const task = new vscode.MockTask('build');
       const execution = new vscode.MockTaskExecution(task);
-      provider._runningTasks.set('build', execution);
-      provider._taskStates.set('build', 'running');
+      provider._runningTasks.set('Workspace|build', execution);
+      provider._taskStates.set('Workspace|build', 'running');
 
-      await provider.stopTask('build');
+      await provider.stopTask('Workspace|build');
       assert.strictEqual(provider._stoppingTasks.size, 0);
     });
   });
@@ -117,9 +117,9 @@ suite('Resource Management Tests', () => {
 
     test('taskHistory durations capped at 10 per task', async () => {
       for (let i = 0; i < 15; i++) {
-        await provider.updateTaskHistory('build', i * 100);
+        await provider.updateTaskHistory('Workspace|build', i * 100);
       }
-      const h = await provider.getTaskHistory('build');
+      const h = await provider.getTaskHistory('Workspace|build');
       assert.strictEqual(h.durations.length, 10);
     });
   });
@@ -198,14 +198,14 @@ suite('Resource Management Tests', () => {
       // Make terminate throw so it falls through to Method 2
       execution.terminate = () => { throw new Error('cannot terminate'); };
 
-      provider._runningTasks.set('build', execution);
-      provider._taskStates.set('build', 'running');
+      provider._runningTasks.set('Workspace|build', execution);
+      provider._taskStates.set('Workspace|build', 'running');
 
       // Add a matching terminal
       const terminal = new vscode.MockTerminal('Task - build');
       vscode.window.terminals.push(terminal);
 
-      await provider.stopTask('build');
+      await provider.stopTask('Workspace|build');
 
       assert.strictEqual(terminal._disposed, true);
       vscode.window._clearTerminals();

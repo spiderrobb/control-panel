@@ -65,13 +65,13 @@
         }
       }
     },
-    {
-      "label": "lint",
-      "type": "npm",
-      "script": "lint",
-      "group": "test",
-      "problemMatcher": ["$eslint-stylish"]
-    },
+    // {
+    //   "label": "lint",
+    //   "type": "npm",
+    //   "script": "lint",
+    //   "group": "test",
+    //   "problemMatcher": ["$eslint-stylish"]
+    // },
     {
       "label": "test",
       "type": "npm",
@@ -86,9 +86,9 @@
       "problemMatcher": []
     },
     {
-      "label": "npm: install",
+      "label": "install",
       "type": "shell",
-      "command": "npm install",
+      "command": "install",
       "problemMatcher": []
     },
     {
@@ -96,7 +96,7 @@
       "type": "shell",
       "command": "code --install-extension controlpanel-0.0.1.vsix && echo '\n✅ Extension installed! Press Ctrl+R to reload VS Code window.\n'",
       "problemMatcher": [],
-      "dependsOn": ["compile","package"],
+      "dependsOn": ["package"],
       "dependsOrder": "sequence",
       "presentation": {
         "echo": true,
@@ -263,6 +263,13 @@
       "label": "test:lint",
       "type": "shell",
       "command": "npm run lint",
+      "group": "test",
+      "problemMatcher": []
+    },
+    {
+      "label": "multi-source:test",
+      "type": "shell",
+      "command": "echo 'Running multi-source tests from: workspace tasks.json.' && sleep 3",
       "group": "test",
       "problemMatcher": []
     },

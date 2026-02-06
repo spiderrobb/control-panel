@@ -6,7 +6,12 @@ import StarIcon from '@mui/icons-material/Star';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 
-function StarredTasksList({ tasks, onRun, onToggleStar, isCollapsed, onToggleCollapsed }) {
+function StarredTasksList({ tasks, allTasks, onRun, onToggleStar, isCollapsed, onToggleCollapsed }) {
+  
+  const getDisplayLabel = (label) => {
+    const task = allTasks?.find(t => t.id === label || t.label === label);
+    return task?.displayLabel || label;
+  };
 
   return (
     <div className="starred-tasks-panel">
@@ -38,7 +43,7 @@ function StarredTasksList({ tasks, onRun, onToggleStar, isCollapsed, onToggleCol
                     <StarIcon sx={{ fontSize: 16 }} />
                   </IconButton>
                 </Tooltip>
-                <span className="task-label">{label}</span>
+                <span className="task-label">{getDisplayLabel(label)}</span>
                 <Tooltip title="Run task">
                   <IconButton
                     size="small"

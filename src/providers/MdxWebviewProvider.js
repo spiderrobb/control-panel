@@ -28,6 +28,13 @@ class MdxWebviewProvider {
     context.subscriptions.push(this._taskEnd);
   }
 
+  // Generate a unique ID for a task
+  getTaskId(task) {
+    if (!task) return null;
+    const source = task.source || 'User';
+    return `${source}|${task.name}`;
+  }
+
   // Async mutex helper to serialize global state read-modify-write operations
   _withStateLock(fn) {
     const next = this._stateMutex.then(() => fn()).catch(err => {
@@ -218,50 +225,57 @@ class MdxWebviewProvider {
     return dep.label || dep.task || null;
   }
 
-  async registerTaskDependencies(label) {
+  async registerTaskDependencies(taskId) {
     const tasks = await vscode.tasks.fetchTasks();
-    const task = tasks.find(t => t.name === label);
+    const task = tasks.find(t => this.getTaskId(t) === taskId);
 
     if (!task) return [];
 
     const dependencies = await this.getTaskDependencies(task);
-    const depLabels = [];
+    const depIds = [];
 
     dependencies.forEach(dep => {
-      const depLabel = this.normalizeDependencyLabel(dep);
-      if (depLabel && depLabel !== label) {
-        this.addSubtask(label, depLabel);
-        depLabels.push(depLabel);
+      const depName = this.normalizeDependencyLabel(dep);
+      if (depName) {
+        // Resolve dependency name to ID using first match (VS Code behavior)
+        const depTask = tasks.find(t => t.name === depName);
+        if (depTask) {
+          const depId = this.getTaskId(depTask);
+          if (depId !== taskId) {
+            this.addSubtask(taskId, depId);
+            depIds.push(depId);
+          }
+        }
       }
     });
 
-    return depLabels;
+    return depIds;
   }
 
-  async ensureParentRunning(parentLabel) {
-    const currentState = this._taskStates.get(parentLabel);
-    const currentExecution = this._runningTasks.get(parentLabel);
+  async ensureParentRunning(parentId) {
+    const currentState = this._taskStates.get(parentId);
+    const currentExecution = this._runningTasks.get(parentId);
 
     // If parent already running with real execution, no-op
     if (currentState === 'running' && currentExecution) {
       return;
     }
 
-    const startTime = this._taskStartTimes.get(parentLabel) || Date.now();
-    this._taskStartTimes.set(parentLabel, startTime);
-    this._taskStates.set(parentLabel, 'running');
+    const startTime = this._taskStartTimes.get(parentId) || Date.now();
+    this._taskStartTimes.set(parentId, startTime);
+    this._taskStates.set(parentId, 'running');
 
-    if (!this._runningTasks.has(parentLabel)) {
-      this._runningTasks.set(parentLabel, null);
+    if (!this._runningTasks.has(parentId)) {
+      this._runningTasks.set(parentId, null);
     }
 
-    const history = await this.getTaskHistory(parentLabel);
+    const history = await this.getTaskHistory(parentId);
     const avgDuration = this.getAverageDuration(history.durations);
-    const subtasks = this.getTaskHierarchy(parentLabel);
+    const subtasks = this.getTaskHierarchy(parentId);
 
     this._view?.webview.postMessage({
       type: 'taskStarted',
-      taskLabel: parentLabel,
+      taskLabel: parentId,
       execution: null,
       startTime,
       avgDuration,
@@ -273,7 +287,7 @@ class MdxWebviewProvider {
 
     this._view?.webview.postMessage({
       type: 'taskStateChanged',
-      taskLabel: parentLabel,
+      taskLabel: parentId,
       state: 'running',
       canStop: true,
       canFocus: false
@@ -473,6 +487,39 @@ class MdxWebviewProvider {
           });
           break;
         }
+        case 'copyTasksJson': {
+          try {
+            const tasks = await vscode.tasks.fetchTasks();
+            // Serialize tasks to JSON-friendly format
+            const tasksData = tasks.map(task => ({
+              name: task.name,
+              source: task.source,
+              definition: task.definition,
+              scope: task.scope?.name || task.scope,
+              detail: task.detail,
+              group: task.group ? {
+                id: task.group.id,
+                isDefault: task.group.isDefault
+              } : undefined,
+              presentationOptions: task.presentationOptions,
+              isBackground: task.isBackground,
+              problemMatchers: task.problemMatchers,
+              runOptions: task.runOptions
+            }));
+            
+            const jsonString = JSON.stringify(tasksData, null, 2);
+            await vscode.env.clipboard.writeText(jsonString);
+            vscode.window.showInformationMessage(
+              `Copied ${tasks.length} task(s) JSON to clipboard`
+            );
+          } catch (error) {
+            this._logger.error('Failed to copy tasks JSON:', error);
+            vscode.window.showErrorMessage(
+              `Failed to copy tasks JSON: ${error.message}`
+            );
+          }
+          break;
+        }
       }
     });
   }
@@ -652,11 +699,18 @@ class MdxWebviewProvider {
     const tasks = await vscode.tasks.fetchTasks();
     const taskList = await Promise.all(tasks.map(async task => {
       const dependencyInfo = await this.getTaskDependencyInfo(task);
+      // No prefix for npm tasks anymore - chips will handle visual distinction
+      const displayLabel = task.name;
+      const taskId = this.getTaskId(task);
       return {
+        id: taskId,
+        // 'label' field is set to task.name - kept for legacy lookup
         label: task.name,
+        displayLabel: displayLabel,
         detail: task.detail || '',
         source: task.source,
-        dependsOn: dependencyInfo.dependsOn,
+        definition: task.definition, // Include definition for script names and paths
+        dependsOn: dependencyInfo.dependsOn, // Note: these are currently names, not IDs
         dependsOrder: dependencyInfo.dependsOrder
       };
     }));
@@ -730,13 +784,30 @@ class MdxWebviewProvider {
     return { dependsOn, dependsOrder };
   }
 
-  async runTask(label) {
+  // Invokes a task by name or ID
+  // @param {string} labelOrId - The task name to invoke or unique ID
+  async runTask(labelOrId) {
     const tasks = await vscode.tasks.fetchTasks();
-    const task = tasks.find(t => t.name === label);
+    // Handle both "npm: name" format, plain task names, and unique IDs
+    
+    // 1. Try ID match
+    let task = tasks.find(t => this.getTaskId(t) === labelOrId);
+    
+    // 2. Try Name match (Legacy)
+    if (!task) {
+      task = tasks.find(t => t.name === labelOrId);
+    }
+    
+    // 3. Try "npm: name" match (Legacy MDX)
+    if (!task && labelOrId.startsWith('npm: ')) {
+      const scriptName = labelOrId.substring(5); // Remove "npm: " prefix
+      task = tasks.find(t => t.source === 'npm' && t.name === scriptName);
+    }
 
     if (task) {
+      const taskId = this.getTaskId(task);
       // Clear any persisted failure when re-running
-      await this.clearFailedTask(label);
+      await this.clearFailedTask(taskId);
 
       // Check if task has dependencies
       const dependencies = await this.getTaskDependencies(task);
@@ -745,32 +816,53 @@ class MdxWebviewProvider {
       if (dependencies.length > 0) {
         // Register dependencies as subtasks
         dependencies.forEach(dep => {
-          const depLabel = this.normalizeDependencyLabel(dep);
-          if (depLabel && depLabel !== label) {
-            this.addSubtask(label, depLabel);
-            subtasks.push(depLabel);
+          const depName = this.normalizeDependencyLabel(dep);
+          if (depName) {
+            // Resolve dependency name to ID using first match
+            const depTask = tasks.find(t => t.name === depName);
+            if (depTask) {
+              const depId = this.getTaskId(depTask);
+              if (depId !== taskId) {
+                this.addSubtask(taskId, depId);
+                subtasks.push(depId);
+              }
+            }
           }
         });
       }
       
       const execution = await vscode.tasks.executeTask(task);
-      this._runningTasks.set(label, execution);
-      await this.addRecentlyUsedTask(label);
+      this._runningTasks.set(taskId, execution);
+      await this.addRecentlyUsedTask(taskId);
     } else {
-      vscode.window.showErrorMessage(`Task not found: ${label}`);
+      vscode.window.showErrorMessage(`Task not found: ${labelOrId}`);
     }
   }
 
-  async stopTask(label) {
-    const execution = this._runningTasks.get(label);
-    const state = this._taskStates.get(label);
-    const children = this.getTaskHierarchy(label);
+  // Stops a running task by ID
+  // @param {string} labelOrId - The task ID to stop
+  async stopTask(labelOrId) {
+    let taskId = labelOrId;
+    
+    // Attempt to resolve label to ID if not found in state directly
+    if (!this._runningTasks.has(taskId) && !this._taskStates.has(taskId)) {
+       // If it doesn't look like an ID (no pipe), try to find it
+       if (!taskId.includes('|')) {
+         const tasks = await vscode.tasks.fetchTasks();
+         const task = tasks.find(t => t.name === taskId);
+         if (task) taskId = this.getTaskId(task);
+       }
+    }
+
+    const execution = this._runningTasks.get(taskId);
+    const state = this._taskStates.get(taskId);
+    const children = this.getTaskHierarchy(taskId);
     
     // Don't try to stop if already stopped, failed, or currently being stopped (circular dependency protection)
-    if ((!execution && (!children || children.length === 0)) || state === 'stopped' || state === 'failed' || this._stoppingTasks.has(label)) {
+    if ((!execution && (!children || children.length === 0)) || state === 'stopped' || state === 'failed' || this._stoppingTasks.has(taskId)) {
       this._view?.webview.postMessage({
         type: 'taskStateChanged',
-        taskLabel: label,
+        taskLabel: taskId,
         state: state || 'stopped',
         canStop: false,
         canFocus: false
@@ -779,13 +871,13 @@ class MdxWebviewProvider {
     }
     
     // Mark this task as being stopped to prevent circular dependencies
-    this._stoppingTasks.add(label);
+    this._stoppingTasks.add(taskId);
     
     // Set stopping state and notify UI immediately
-    this._taskStates.set(label, 'stopping');
+    this._taskStates.set(taskId, 'stopping');
     this._view?.webview.postMessage({
       type: 'taskStateChanged',
-      taskLabel: label,
+      taskLabel: taskId,
       state: 'stopping',
       canStop: false,
       canFocus: false
@@ -793,16 +885,16 @@ class MdxWebviewProvider {
     
     // Recursively stop all child tasks in parallel (faster termination)
     if (children && children.length > 0) {
-      this._logger.info(`Stopping ${children.length} child task(s) of "${label}"...`);
+      this._logger.info(`Stopping ${children.length} child task(s) of "${taskId}"...`);
       try {
-        await Promise.all(children.map(childLabel => this.stopTask(childLabel)));
+        await Promise.all(children.map(childId => this.stopTask(childId)));
         
         // Clean up taskHierarchy after children are stopped
-        for (const childLabel of children) {
-          this.removeSubtask(label, childLabel);
+        for (const childId of children) {
+          this.removeSubtask(taskId, childId);
         }
       } catch (error) {
-        this._logger.warn(`Error stopping children of task ${label}:`, error);
+        this._logger.warn(`Error stopping children of task ${taskId}:`, error);
       }
     }
     
@@ -812,29 +904,32 @@ class MdxWebviewProvider {
     try {
       if (execution) {
         execution.terminate();
-        this._logger.info(`Method 1 (API terminate): Sent terminate signal to task "${label}"`);
+        this._logger.info(`Method 1 (API terminate): Sent terminate signal to task "${taskId}"`);
         stopped = true;
       }
     } catch (error) {
-      this._logger.warn(`Method 1 failed for task ${label}:`, error);
+      this._logger.warn(`Method 1 failed for task ${taskId}:`, error);
     }
     
+    // Extract task name for terminal matching (IDs are "Source|Name")
+    const taskName = taskId.includes('|') ? taskId.split('|')[1] : taskId;
+
     // Method 2: Try to find and dispose the terminal
     if (!stopped) {
       try {
         const terminals = vscode.window.terminals;
         const terminal = terminals.find(t => 
-          t.name.includes(label) || 
-          t.name === 'Task - ' + label
+          t.name.includes(taskName) || 
+          t.name === 'Task - ' + taskName
         );
         
         if (terminal) {
           terminal.dispose();
-          this._logger.info(`Method 2 (terminal dispose): Disposed terminal for task "${label}"`);
+          this._logger.info(`Method 2 (terminal dispose): Disposed terminal for task "${taskName}"`);
           stopped = true;
         }
       } catch (error) {
-        this._logger.warn(`Method 2 failed for task ${label}:`, error);
+        this._logger.warn(`Method 2 failed for task ${taskName}:`, error);
       }
     }
     
@@ -843,27 +938,27 @@ class MdxWebviewProvider {
       try {
         const terminals = vscode.window.terminals;
         const terminal = terminals.find(t => 
-          t.name.includes(label) || 
-          t.name === 'Task - ' + label
+          t.name.includes(taskName) || 
+          t.name === 'Task - ' + taskName
         );
         
         if (terminal) {
           // Send Ctrl+C signal to terminal
           terminal.sendText('\x03');
-          this._logger.info(`Method 3 (Ctrl+C): Sent SIGINT to terminal for task "${label}"`);
+          this._logger.info(`Method 3 (Ctrl+C): Sent SIGINT to terminal for task "${taskName}"`);
           
           // Wait briefly then kill if still alive
           setTimeout(() => {
             if (vscode.window.terminals.includes(terminal)) {
               terminal.dispose();
-              this._logger.info(`Method 3 (delayed dispose): Force disposed terminal for task "${label}"`);
+              this._logger.info(`Method 3 (delayed dispose): Force disposed terminal for task "${taskName}"`);
             }
           }, 500);
           
           stopped = true;
         }
       } catch (error) {
-        this._logger.warn(`Method 3 failed for task ${label}:`, error);
+        this._logger.warn(`Method 3 failed for task ${taskName}:`, error);
       }
     }
     
@@ -874,7 +969,7 @@ class MdxWebviewProvider {
         let killedCount = 0;
         
         terminals.forEach(terminal => {
-          if (terminal.name.toLowerCase().includes(label.toLowerCase())) {
+          if (terminal.name.toLowerCase().includes(taskName.toLowerCase())) {
             try {
               terminal.dispose();
               killedCount++;
@@ -885,24 +980,24 @@ class MdxWebviewProvider {
         });
         
         if (killedCount > 0) {
-          this._logger.info(`Method 4 (force all): Disposed ${killedCount} terminal(s) for task "${label}"`);
+          this._logger.info(`Method 4 (force all): Disposed ${killedCount} terminal(s) for task "${taskName}"`);
           stopped = true;
         }
       } catch (error) {
-        this._logger.warn(`Method 4 failed for task ${label}:`, error);
+        this._logger.warn(`Method 4 failed for task ${taskName}:`, error);
       }
     }
     
     // Clean up tracking regardless of stop success
-    this._runningTasks.delete(label);
-    this._taskStartTimes.delete(label);
-    this._taskHierarchy.delete(label);
-    this._taskStates.delete(label);
-    this._stoppingTasks.delete(label); // Remove from stopping set
+    this._runningTasks.delete(taskId);
+    this._taskStartTimes.delete(taskId);
+    this._taskHierarchy.delete(taskId);
+    this._taskStates.delete(taskId);
+    this._stoppingTasks.delete(taskId); // Remove from stopping set
     
     this._view?.webview.postMessage({
       type: 'taskStateChanged',
-      taskLabel: label,
+      taskLabel: taskId,
       state: 'stopped',
       canStop: false,
       canFocus: false
@@ -911,24 +1006,28 @@ class MdxWebviewProvider {
     // Send completion message
     this._view?.webview.postMessage({
       type: 'taskEnded',
-      taskLabel: label,
+      taskLabel: taskId,
       exitCode: stopped ? 130 : 0, // 130 = terminated by SIGINT
       duration: 0,
       subtasks: []
     });
     
     if (stopped) {
-      this._logger.info(`Successfully stopped task "${label}"`);
+      this._logger.info(`Successfully stopped task "${taskId}"`);
     } else {
-      this._logger.warn(`All stop methods failed for task "${label}", but cleaned up tracking`);
+      this._logger.warn(`All stop methods failed for task "${taskId}", but cleaned up tracking`);
     }
   }
 
-  async focusTaskTerminal(label) {
+  // Brings task's terminal into focus
+  // @param {string} labelOrId - The task name or ID
+  async focusTaskTerminal(labelOrId) {
+    const taskName = labelOrId.includes('|') ? labelOrId.split('|')[1] : labelOrId;
+    
     // VS Code automatically creates terminals for tasks
     // We'll try to find the terminal by name
     const terminals = vscode.window.terminals;
-    const terminal = terminals.find(t => t.name.includes(label));
+    const terminal = terminals.find(t => t.name.includes(taskName));
     
     if (terminal) {
       terminal.show();
@@ -936,162 +1035,213 @@ class MdxWebviewProvider {
       // Terminal doesn't exist or was closed
       this._view?.webview.postMessage({
         type: 'taskStateChanged',
-        taskLabel: label,
+        taskLabel: labelOrId,
         canFocus: false,
         message: 'Terminal not found'
       });
-      vscode.window.showWarningMessage(`Terminal for task "${label}" not found. It may have been closed.`);
+      vscode.window.showWarningMessage(`Terminal for task "${taskName}" not found. It may have been closed.`);
     }
   }
 
-  async openTaskDefinition(label) {
+  // Opens the file where a task is defined
+  // @param {string} labelOrId - The task name or ID
+  async openTaskDefinition(labelOrId) {
     const workspaceFolders = vscode.workspace.workspaceFolders;
     if (!workspaceFolders) {
       return;
     }
 
-    // Look for tasks.json in .vscode folder
-    const tasksJsonPath = path.join(workspaceFolders[0].uri.fsPath, '.vscode', 'tasks.json');
-    
-    if (!fs.existsSync(tasksJsonPath)) {
-      vscode.window.showInformationMessage(`tasks.json not found. Task "${label}" may be defined elsewhere.`);
-      return;
-    }
+    const workspaceRoot = workspaceFolders[0].uri.fsPath;
+    let task = null;
+    let searchLabel = labelOrId;
 
     try {
-      // Read the tasks.json file
-      const content = fs.readFileSync(tasksJsonPath, 'utf8');
-      const lines = content.split('\n');
+      const tasks = await vscode.tasks.fetchTasks();
       
-      // Find the line with the task label
+      // Try ID
+      task = tasks.find(t => this.getTaskId(t) === labelOrId);
+      
+      // Try label
+      if (!task) {
+         task = tasks.find(t => t.name === labelOrId);
+      }
+
+      // Try legacy npm format
+      if (!task && labelOrId.startsWith('npm: ')) {
+        const scriptName = labelOrId.substring(5);
+        task = tasks.find(t => t.source === 'npm' && t.name === scriptName);
+      }
+      
+      if (task) {
+          searchLabel = task.name;
+      }
+      
+    } catch (error) {
+      this._logger.warn('Failed to fetch tasks for openTaskDefinition:', error);
+    }
+
+    const source = task?.source;
+    const definition = task?.definition || {};
+
+    const openFileAtLabel = async (filePath, labelKey, labelField) => {
+      const content = fs.readFileSync(filePath, 'utf8');
+      const lines = content.split('\n');
       let targetLine = -1;
+
       for (let i = 0; i < lines.length; i++) {
-        // Look for "label": "taskname" pattern
-        if (lines[i].includes('"label"') && lines[i].includes(`"${label}"`)) {
+        if (labelField && lines[i].includes(labelField) && lines[i].includes(`"${labelKey}"`)) {
+          targetLine = i;
+          break;
+        }
+        if (!labelField && lines[i].includes(`"${labelKey}"`)) {
           targetLine = i;
           break;
         }
       }
-      
-      // Open the document
-      const document = await vscode.workspace.openTextDocument(tasksJsonPath);
+
+      const document = await vscode.workspace.openTextDocument(filePath);
       const editor = await vscode.window.showTextDocument(document);
-      
-      // If we found the task, move cursor to it
+
       if (targetLine >= 0) {
         const position = new vscode.Position(targetLine, 0);
         editor.selection = new vscode.Selection(position, position);
         editor.revealRange(new vscode.Range(position, position), vscode.TextEditorRevealType.InCenter);
       }
+    };
+
+    try {
+      if (source === 'npm') {
+        const definitionPath = definition?.path;
+        const basePath = definitionPath ? path.join(workspaceRoot, definitionPath) : workspaceRoot;
+        const packageJsonPath = path.join(basePath, 'package.json');
+
+        if (!fs.existsSync(packageJsonPath)) {
+          vscode.window.showInformationMessage(`package.json not found. Task "${searchLabel}" may be defined elsewhere.`);
+          return;
+        }
+
+        await openFileAtLabel(packageJsonPath, searchLabel, null);
+        return;
+      }
+
+      const tasksJsonPath = path.join(workspaceRoot, '.vscode', 'tasks.json');
+      if (!fs.existsSync(tasksJsonPath)) {
+        vscode.window.showInformationMessage(`tasks.json not found. Task "${searchLabel}" may be defined elsewhere.`);
+        return;
+      }
+
+      await openFileAtLabel(tasksJsonPath, searchLabel, '"label"');
     } catch (error) {
-      this._logger.error(`Error opening task definition for "${label}":`, error);
+      this._logger.error(`Error opening task definition for "${searchLabel}":`, error);
       vscode.window.showErrorMessage(`Error opening task definition: ${error.message}`);
     }
   }
 
   async handleTaskStarted(event) {
-    const label = event.execution.task.name;
-    const currentState = this._taskStates.get(label);
-    const currentExecution = this._runningTasks.get(label);
+    // Extract unique identifier
+    const taskId = this.getTaskId(event.execution.task);
+    const currentState = this._taskStates.get(taskId);
+    const currentExecution = this._runningTasks.get(taskId);
     
     // Guard: skip if task is already running (prevents duplicate handling)
     if (currentState === 'running' && currentExecution) {
-      this._logger.warn(`Task "${label}" is already running, ignoring duplicate start event`);
+      this._logger.warn(`Task "${taskId}" is already running, ignoring duplicate start event`);
       return;
     }
     
     const startTime = Date.now();
-    this._logger.info(`Task started: "${label}"`);
+    this._logger.info(`Task started: "${taskId}"`);
     
-    this._taskStartTimes.set(label, startTime);
-    this._taskStates.set(label, 'running');
-    this._runningTasks.set(label, event.execution);
+    this._taskStartTimes.set(taskId, startTime);
+    this._taskStates.set(taskId, 'running');
+    this._runningTasks.set(taskId, event.execution);
     // Clear any previous failure state
-    this._taskFailures.delete(label);
+    this._taskFailures.delete(taskId);
     // Clear persisted failure
-    this.clearFailedTask(label);
+    this.clearFailedTask(taskId);
     
     // Register this task's own dependencies (handles nested chains)
     try {
-      await this.registerTaskDependencies(label);
+      await this.registerTaskDependencies(taskId);
     } catch (error) {
-      this._logger.warn(`Failed to register dependencies for task ${label}:`, error);
+      this._logger.warn(`Failed to register dependencies for task ${taskId}:`, error);
     }
 
     // Check if this task is a subtask of any running task
-    this._taskHierarchy.forEach((subtasks, parentLabel) => {
-      if (subtasks.has(label)) {
-        this.ensureParentRunning(parentLabel).catch(err => {
-          this._logger.warn(`Failed to ensure parent task running for ${parentLabel}:`, err);
+    this._taskHierarchy.forEach((subtasks, parentId) => {
+      if (subtasks.has(taskId)) {
+        this.ensureParentRunning(parentId).catch(err => {
+          this._logger.warn(`Failed to ensure parent task running for ${parentId}:`, err);
         });
         // Notify webview that a subtask started
         this._view?.webview.postMessage({
           type: 'subtaskStarted',
-          parentLabel,
-          childLabel: label,
-          parentStartTime: this._taskStartTimes.get(parentLabel) || Date.now()
+          parentLabel: parentId,
+          childLabel: taskId,
+          parentStartTime: this._taskStartTimes.get(parentId) || Date.now()
         });
       }
     });
     
     // Get task history for progress estimation
-    this.getTaskHistory(label).then(history => {
+    this.getTaskHistory(taskId).then(history => {
       const avgDuration = this.getAverageDuration(history.durations);
       
       this._view?.webview.postMessage({
         type: 'taskStarted',
-        taskLabel: label,
+        taskLabel: taskId,
         execution: event.execution,
         startTime,
         avgDuration,
         isFirstRun: history.count === 0,
-        subtasks: this.getTaskHierarchy(label)
+        subtasks: this.getTaskHierarchy(taskId)
       });
     });
   }
 
   handleTaskEnded(event) {
-    const label = event.execution.task.name;
-    const currentState = this._taskStates.get(label);
+    // Extract unique identifier
+    const taskId = this.getTaskId(event.execution.task);
+    const currentState = this._taskStates.get(taskId);
     
     // Guard: skip if task was already stopped (e.g., via stopTask) or has no state
     if (currentState === 'stopped') {
-      this._logger.warn(`Task "${label}" is already stopped, ignoring duplicate end event`);
+      this._logger.warn(`Task "${taskId}" is already stopped, ignoring duplicate end event`);
       return;
     }
     
-    const startTime = this._taskStartTimes.get(label);
+    const startTime = this._taskStartTimes.get(taskId);
     const endTime = Date.now();
     const duration = startTime ? endTime - startTime : 0;
     const exitCode = event.exitCode !== undefined ? event.exitCode : 0;
     const failed = exitCode !== 0;
 
     if (failed) {
-      this._logger.error(`Task "${label}" failed with exit code ${exitCode} after ${duration}ms`);
+      this._logger.error(`Task "${taskId}" failed with exit code ${exitCode} after ${duration}ms`);
     } else {
-      this._logger.info(`Task "${label}" completed successfully in ${duration}ms`);
+      this._logger.info(`Task "${taskId}" completed successfully in ${duration}ms`);
     }
     
     // Get subtasks and parent before cleaning up
-    const subtasks = this.getTaskHierarchy(label);
-    let parentLabel = null;
+    const subtasks = this.getTaskHierarchy(taskId);
+    let parentId = null;
     this._taskHierarchy.forEach((children, parent) => {
-      if (children.has(label)) {
-        parentLabel = parent;
+      if (children.has(taskId)) {
+        parentId = parent;
       }
     });
     
     // Create execution record for history
     const executionRecord = {
-      id: `${label}-${startTime}`,
-      taskLabel: label,
+      id: `${taskId}-${startTime}`,
+      taskLabel: taskId,
       startTime,
       endTime,
       duration,
       exitCode,
       failed,
-      reason: failed ? (this._taskFailures.get(label)?.reason || 'Task exited with non-zero code') : null,
-      parentLabel,
+      reason: failed ? (this._taskFailures.get(taskId)?.reason || 'Task exited with non-zero code') : null,
+      parentLabel: parentId,
       childLabels: subtasks
     };
     
@@ -1102,7 +1252,7 @@ class MdxWebviewProvider {
     
     // Update task history with duration (only if successful)
     if (!failed) {
-      this.updateTaskHistory(label, duration);
+      this.updateTaskHistory(taskId, duration);
     }
     
     // Track failure if task failed
@@ -1114,21 +1264,21 @@ class MdxWebviewProvider {
         duration,
         subtasks
       };
-      this._taskFailures.set(label, failureInfo);
+      this._taskFailures.set(taskId, failureInfo);
       // Persist failure so it survives view changes
-      this.saveFailedTask(label, failureInfo);
+      this.saveFailedTask(taskId, failureInfo);
     }
     
     // Check if this task is a subtask of any running task
     const parentTasks = [];
-    this._taskHierarchy.forEach((subtasks, parentLabel) => {
-      if (subtasks.has(label)) {
-        parentTasks.push(parentLabel);
+    this._taskHierarchy.forEach((subtasks, parentId) => {
+      if (subtasks.has(taskId)) {
+        parentTasks.push(parentId);
         // Notify webview that a subtask ended
         this._view?.webview.postMessage({
           type: 'subtaskEnded',
-          parentLabel,
-          childLabel: label,
+          parentLabel: parentId,
+          childLabel: taskId,
           exitCode,
           failed
         });
@@ -1137,31 +1287,31 @@ class MdxWebviewProvider {
     
     // If this task failed, propagate failure to parent tasks
     if (failed && parentTasks.length > 0) {
-      parentTasks.forEach(parentLabel => {
-        this.propagateTaskFailure(parentLabel, label, exitCode);
+      parentTasks.forEach(parentId => {
+        this.propagateTaskFailure(parentId, taskId, exitCode);
       });
     }
     
     // Clean up
-    this._runningTasks.delete(label);
-    this._taskStartTimes.delete(label);
-    this._taskHierarchy.delete(label);
-    this._taskStates.delete(label);
+    this._runningTasks.delete(taskId);
+    this._taskStartTimes.delete(taskId);
+    this._taskHierarchy.delete(taskId);
+    this._taskStates.delete(taskId);
     
     // Send appropriate message based on success/failure
     if (failed) {
       this._view?.webview.postMessage({
         type: 'taskFailed',
-        taskLabel: label,
+        taskLabel: taskId,
         exitCode,
-        reason: this._taskFailures.get(label)?.reason || 'Task failed',
+        reason: this._taskFailures.get(taskId)?.reason || 'Task failed',
         duration,
         subtasks
       });
     } else {
       this._view?.webview.postMessage({
         type: 'taskEnded',
-        taskLabel: label,
+        taskLabel: taskId,
         exitCode,
         duration,
         subtasks
@@ -1169,47 +1319,47 @@ class MdxWebviewProvider {
     }
   }
 
-  propagateTaskFailure(parentLabel, failedSubtask, exitCode) {
+  propagateTaskFailure(parentId, failedSubtaskId, exitCode) {
     // Mark parent as failed due to dependency failure
-    const parentExecution = this._runningTasks.get(parentLabel);
+    const parentExecution = this._runningTasks.get(parentId);
 
     // Compute duration and subtasks BEFORE using them in failureInfo
-    const startTime = this._taskStartTimes.get(parentLabel) || Date.now();
+    const startTime = this._taskStartTimes.get(parentId) || Date.now();
     const duration = Date.now() - startTime;
-    const subtasks = this.getTaskHierarchy(parentLabel);
+    const subtasks = this.getTaskHierarchy(parentId);
 
     // Set failure state for parent
-    this._taskStates.set(parentLabel, 'failed');
+    this._taskStates.set(parentId, 'failed');
     const failureInfo = {
       exitCode: -1, // Special code for dependency failure
-      reason: `Dependency failed: ${failedSubtask} (exit code ${exitCode})`,
-      failedDependency: failedSubtask,
+      reason: `Dependency failed: ${failedSubtaskId} (exit code ${exitCode})`,
+      failedDependency: failedSubtaskId,
       timestamp: Date.now(),
       duration,
       subtasks
     };
-    this._taskFailures.set(parentLabel, failureInfo);
+    this._taskFailures.set(parentId, failureInfo);
     // Persist failure so it survives view changes
-    this.saveFailedTask(parentLabel, failureInfo);
+    this.saveFailedTask(parentId, failureInfo);
 
     // Terminate the parent task if it actually started
     if (parentExecution) {
       try {
         parentExecution.terminate();
       } catch (error) {
-        this._logger.warn(`Failed to terminate parent task ${parentLabel}:`, error);
+        this._logger.warn(`Failed to terminate parent task ${parentId}:`, error);
       }
     }
 
-    this._logger.error(`Task "${parentLabel}" failed: dependency "${failedSubtask}" exited with code ${exitCode}`);
+    this._logger.error(`Task "${parentId}" failed: dependency "${failedSubtaskId}" exited with code ${exitCode}`);
 
     // Notify webview
     this._view?.webview.postMessage({
       type: 'taskFailed',
-      taskLabel: parentLabel,
+      taskLabel: parentId,
       exitCode: -1,
-      reason: `Dependency failed: ${failedSubtask}`,
-      failedDependency: failedSubtask,
+      reason: `Dependency failed: ${failedSubtaskId}`,
+      failedDependency: failedSubtaskId,
       duration,
       subtasks
     });
@@ -1217,14 +1367,14 @@ class MdxWebviewProvider {
     // Record failure in execution history even if parent never started
     let parentOfParent = null;
     this._taskHierarchy.forEach((children, possibleParent) => {
-      if (children.has(parentLabel)) {
+      if (children.has(parentId)) {
         parentOfParent = possibleParent;
       }
     });
 
     const executionRecord = {
-      id: `${parentLabel}-${startTime}`,
-      taskLabel: parentLabel,
+      id: `${parentId}-${startTime}`,
+      taskLabel: parentId,
       startTime,
       endTime: Date.now(),
       duration,
@@ -1239,15 +1389,15 @@ class MdxWebviewProvider {
     });
 
     // Clean up
-    this._runningTasks.delete(parentLabel);
-    this._taskStartTimes.delete(parentLabel);
-    this._taskHierarchy.delete(parentLabel);
-    this._taskStates.delete(parentLabel);
+    this._runningTasks.delete(parentId);
+    this._taskStartTimes.delete(parentId);
+    this._taskHierarchy.delete(parentId);
+    this._taskStates.delete(parentId);
 
     // Recursively propagate to grandparents
-    this._taskHierarchy.forEach((subtasks, grandparentLabel) => {
-      if (subtasks.has(parentLabel)) {
-        this.propagateTaskFailure(grandparentLabel, parentLabel, -1);
+    this._taskHierarchy.forEach((subtasks, grandparentId) => {
+      if (subtasks.has(parentId)) {
+        this.propagateTaskFailure(grandparentId, parentId, -1);
       }
     });
   }

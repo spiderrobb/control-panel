@@ -51,6 +51,7 @@
     ]
   },
   "scripts": {
+    "multi-source:test": "echo 'Running multi-source tests from package.json...' && sleep 3",
     "vscode:prepublish": "npm run build",
     "build": "webpack --mode production",
     "compile": "webpack --mode development",

@@ -1,7 +1,8 @@
 import React from 'react';
 import TaskLink from './TaskLink';
 
-function TaskList({ labelStartsWith, tasks, onRun, onStop, onFocus, onOpenDefinition, runningTasks, starredTasks, onToggleStar }) {
+function TaskList({ labelStartsWith, tasks, onRun, onStop, onFocus, onOpenDefinition, runningTasks, starredTasks, onToggleStar, npmPathColorMap, setNpmPathColorMap }) {
+
   const filteredTasks = tasks.filter(task => 
     task.label.startsWith(labelStartsWith)
   );
@@ -16,21 +17,25 @@ function TaskList({ labelStartsWith, tasks, onRun, onStop, onFocus, onOpenDefini
 
   // Render a single task with composite dependency segments
   const renderTask = (task) => (
-    <li key={task.label}>
+    <li key={task.id || task.label}>
       <TaskLink
+        taskId={task.id}
         label={task.label}
+        displayLabel={task.displayLabel}
         onRun={onRun}
         onStop={onStop}
         onFocus={onFocus}
         onOpenDefinition={onOpenDefinition}
-        taskState={runningTasks[task.label]}
+        taskState={runningTasks[task.id || task.label]}
         allRunningTasks={runningTasks}
         dependencySegments={task.dependsOn || []}
         dependsOrder={task.dependsOrder}
+        tasks={tasks}
         starredTasks={starredTasks}
         onToggleStar={onToggleStar}
+        npmPathColorMap={npmPathColorMap}
+        setNpmPathColorMap={setNpmPathColorMap}
       />
-      {task.detail && <span className="task-detail"> — {task.detail}</span>}
     </li>
   );
 

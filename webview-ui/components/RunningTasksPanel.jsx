@@ -9,7 +9,7 @@ import CloseIcon from '@mui/icons-material/Close';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 
-function RunningTasksPanel({ runningTasks, onStop, onFocus, onOpenDefinition, onDismiss, onShowLogs, onRequestLogBuffer, logBuffer, isCollapsed, onToggleCollapsed }) {
+function RunningTasksPanel({ runningTasks, allTasks, onStop, onFocus, onOpenDefinition, onDismiss, onShowLogs, onRequestLogBuffer, logBuffer, isCollapsed, onToggleCollapsed }) {
   const [showDebug, setShowDebug] = useState(false);
   const runningTasksList = Object.entries(runningTasks).filter(([_, state]) => state.running || state.failed);
 
@@ -143,6 +143,7 @@ function RunningTasksPanel({ runningTasks, onStop, onFocus, onOpenDefinition, on
               onOpenDefinition={onOpenDefinition}
               onDismiss={onDismiss}
               allRunningTasks={runningTasks}
+              allTasks={allTasks}
               depth={0}
             />
           ))}
@@ -152,9 +153,14 @@ function RunningTasksPanel({ runningTasks, onStop, onFocus, onOpenDefinition, on
   );
 }
 
-function RunningTaskItem({ label, state, onStop, onFocus, onOpenDefinition, onDismiss, allRunningTasks, depth = 0 }) {
+function RunningTaskItem({ label, state, onStop, onFocus, onOpenDefinition, onDismiss, allRunningTasks, allTasks, depth = 0 }) {
   const [runtime, setRuntime] = useState(0);
   const [progress, setProgress] = useState(0);
+  
+  const getDisplayLabel = (taskLabel) => {
+    const task = allTasks?.find(t => t.id === taskLabel || t.label === taskLabel);
+    return task?.displayLabel || taskLabel;
+  };
 
   const startTime = state?.startTime || null;
   const avgDuration = state?.avgDuration || null;
@@ -207,13 +213,13 @@ function RunningTaskItem({ label, state, onStop, onFocus, onOpenDefinition, onDi
             <span className={`status-dot ${isFailed ? 'failed' : ''}`}></span>
             <div className="task-name-container">
               {parentTaskLabel && (
-                <span className="parent-task-name">{parentTaskLabel}</span>
+                <span className="parent-task-name">{getDisplayLabel(parentTaskLabel)}</span>
               )}
               <span 
                 className="task-name"
                 onDoubleClick={() => onOpenDefinition(label)}
                 title="Double-click to open task definition"
-              >{label}</span>
+              >{getDisplayLabel(label)}</span>
             </div>
             {isFailed ? (
               <>
@@ -221,8 +227,8 @@ function RunningTaskItem({ label, state, onStop, onFocus, onOpenDefinition, onDi
                   Failed {exitCode !== undefined ? `(${exitCode})` : ''}
                 </span>
                 {failedDependency && (
-                  <span className="task-dependency-error" title={`Dependency "${failedDependency}" failed`}>
-                    ← {failedDependency}
+                  <span className="task-dependency-error" title={`Dependency "${getDisplayLabel(failedDependency)}" failed`}>
+                    ← {getDisplayLabel(failedDependency)}
                   </span>
                 )}
               </>
@@ -299,8 +305,8 @@ function RunningTaskItem({ label, state, onStop, onFocus, onOpenDefinition, onDi
               <div className="task-info">
                 <span className="status-dot waiting"></span>
                 <div className="task-name-container">
-                  <span className="parent-task-name">{label}</span>
-                  <span className="task-name">{subtask}</span>
+                  <span className="parent-task-name">{getDisplayLabel(label)}</span>
+                  <span className="task-name">{getDisplayLabel(subtask)}</span>
                 </div>
                 <span className="task-status-text">waiting</span>
               </div>
@@ -318,6 +324,7 @@ function RunningTaskItem({ label, state, onStop, onFocus, onOpenDefinition, onDi
             onOpenDefinition={onOpenDefinition}
             onDismiss={onDismiss}
             allRunningTasks={allRunningTasks}
+            allTasks={allTasks}
             depth={depth + 1}
           />
         );

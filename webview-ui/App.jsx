@@ -7,6 +7,7 @@ import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
 import MoreVertIcon from '@mui/icons-material/MoreVert';
 import HistoryIcon from '@mui/icons-material/History';
 import CloseIcon from '@mui/icons-material/Close';
+import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import Button from '@mui/material/Button';
 import IconButton from '@mui/material/IconButton';
 import Divider from '@mui/material/Divider';
@@ -32,20 +33,37 @@ const TaskStateContext = React.createContext(null);
 function TaskLinkWithState(props) {
   const ctx = useContext(TaskStateContext);
   if (!ctx) return null;
-  const task = ctx.tasks?.find(t => t.label === props.label);
+
+  // Resolve task to get ID
+  let task = ctx.tasks?.find(t => t.id === props.label || t.label === props.label);
+  
+  // Handle "npm: " prefix for legacy MDX support
+  if (!task && props.label && props.label.startsWith('npm: ')) {
+    const scriptName = props.label.substring(5);
+    task = ctx.tasks?.find(t => t.source === 'npm' && t.label === scriptName);
+  }
+
+  const taskId = task?.id;
+  const taskState = taskId ? ctx.runningTasks[taskId] : ctx.runningTasks[props.label];
+
   return (
     <TaskLink
       {...props}
+      taskId={taskId}
+      displayLabel={task?.displayLabel}
       onRun={ctx.onRun}
       onStop={ctx.onStop}
       onFocus={ctx.onFocus}
       onOpenDefinition={ctx.onOpenDefinition}
-      taskState={ctx.runningTasks[props.label]}
+      taskState={taskState}
       allRunningTasks={ctx.runningTasks}
       dependencySegments={task?.dependsOn || []}
       dependsOrder={task?.dependsOrder}
+      tasks={ctx.tasks}
       starredTasks={ctx.starredTasks}
       onToggleStar={ctx.onToggleStar}
+      npmPathColorMap={ctx.npmPathColorMap}
+      setNpmPathColorMap={ctx.setNpmPathColorMap}
     />
   );
 }
@@ -64,6 +82,8 @@ function TaskListWithState(props) {
       runningTasks={ctx.runningTasks}
       starredTasks={ctx.starredTasks}
       onToggleStar={ctx.onToggleStar}
+      npmPathColorMap={ctx.npmPathColorMap}
+      setNpmPathColorMap={ctx.setNpmPathColorMap}
     />
   );
 }
@@ -84,6 +104,7 @@ function App() {
   const [executionHistory, setExecutionHistory] = useState([]);
   const [runningTasksCollapsed, setRunningTasksCollapsed] = useState(false);
   const [starredTasksCollapsed, setStarredTasksCollapsed] = useState(false);
+  const [npmPathColorMap, setNpmPathColorMap] = useState({});
   const contentRef = useRef(null);
 
   useEffect(() => {
@@ -350,6 +371,10 @@ function App() {
     }
   };
 
+  const handleCopyTasksJson = () => {
+    vscode.postMessage({ type: 'copyTasksJson' });
+  };
+
   // State for compiled MDX component
   const [MdxModule, setMdxModule] = useState(null);
   const [mdxError, setMdxError] = useState(null);
@@ -613,6 +638,15 @@ function App() {
                   </span>
                 </div>
                 <div className="breadcrumb-actions">
+                  <Tooltip title="Copy fetchTasks() JSON">
+                    <IconButton
+                      size="small"
+                      onClick={handleCopyTasksJson}
+                      sx={{ p: 0.5, ml: 0.5 }}
+                    >
+                      <ContentCopyIcon sx={{ fontSize: 18 }} />
+                    </IconButton>
+                  </Tooltip>
                   <Tooltip title="Show execution history">
                     <IconButton
                       size="small"
@@ -629,7 +663,7 @@ function App() {
         )}
         <div className="content" ref={contentRef} onScroll={handleContentScroll}>
           {showHistory ? (
-            <ExecutionHistoryPanel history={executionHistory} />
+            <ExecutionHistoryPanel history={executionHistory} allTasks={tasks} />
           ) : (
             <>
               {mdxError && (
@@ -644,6 +678,7 @@ function App() {
         </div>
         <RunningTasksPanel
           runningTasks={runningTasks}
+          allTasks={tasks}
           onStop={handleStopTask}
           onFocus={handleFocusTerminal}
           onOpenDefinition={handleOpenDefinition}
@@ -656,12 +691,14 @@ function App() {
         />
         <RecentTasksList 
           tasks={recentlyUsedTasks}
+          allTasks={tasks}
           onRun={handleRunTask}
           onToggleStar={handleToggleStar}
           starredTasks={starredTasks}
         />
         <StarredTasksList 
           tasks={starredTasks}
+          allTasks={tasks}
           onRun={handleRunTask}
           onToggleStar={handleToggleStar}
           isCollapsed={starredTasksCollapsed}
