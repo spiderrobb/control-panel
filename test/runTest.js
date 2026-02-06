@@ -14,10 +14,14 @@ async function main() {
     await runTests({ 
       extensionDevelopmentPath, 
       extensionTestsPath,
+      extensionTestsEnv: {
+        DISPLAY: process.env.DISPLAY || ':99'
+      },
       launchArgs: [
         '--disable-extensions',
         '--no-sandbox',
-        '--disable-dev-shm-usage'
+        '--disable-dev-shm-usage',
+        '--disable-gpu'
       ]
     });
     

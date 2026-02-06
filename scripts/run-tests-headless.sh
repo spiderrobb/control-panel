@@ -11,7 +11,7 @@ sleep 2
 
 # Run the tests
 cd /workspaces/ControlPanel
-npm test
+node ./test/runTest.js
 
 # Capture the test exit code
 TEST_EXIT_CODE=$?

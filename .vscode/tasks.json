@@ -94,16 +94,30 @@
     {
       "label": "install-extension",
       "type": "shell",
-      "command": "code --install-extension controlpanel-0.0.1.vsix",
+      "command": "code --install-extension controlpanel-0.0.1.vsix && echo '\n✅ Extension installed! Press Ctrl+R to reload VS Code window.\n'",
       "problemMatcher": [],
-      "dependsOn": ["package"]
+      "dependsOn": ["compile","package"],
+      "dependsOrder": "sequence",
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": true,
+        "panel": "shared"
+      }
     },
     {
       "label": "reinstall-extension",
       "type": "shell",
-      "command": "code --uninstall-extension your-publisher-name.controlpanel && code --install-extension controlpanel-0.0.1.vsix",
+      "command": "code --uninstall-extension your-publisher-name.controlpanel && code --install-extension controlpanel-0.0.1.vsix && echo '\n✅ Extension reinstalled! Press Ctrl+R to reload VS Code window.\n'",
       "problemMatcher": [],
-      "dependsOn": ["package"]
+      "dependsOn": ["package"],
+      "dependsOrder": "sequence",
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": true,
+        "panel": "shared"
+      }
     },
     {
       "label": "fail:exit1",
@@ -278,6 +292,19 @@
       "dependsOrder": "sequence",
       "group": "test",
       "problemMatcher": []
+    },
+    {
+      "label": "test:coverage",
+      "type": "shell",
+      "command": "npm run coverage",
+      "group": "test",
+      "problemMatcher": [],
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": false,
+        "panel": "shared"
+      }
     }
   ]
 }

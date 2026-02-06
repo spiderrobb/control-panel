@@ -1,273 +1,318 @@
+/**
+ * Process Lifecycle Tests
+ *
+ * Tests state transitions, task start/end handling, task history,
+ * recently-used tracking, starred tasks, navigation, and webview messaging.
+ */
+
 const assert = require('assert');
-const vscode = require('./vscode-mock');
+const sinon = require('sinon');
+const {
+  createProvider,
+  createStartEvent,
+  createEndEvent,
+} = require('./helpers/provider-factory');
 
 suite('Process Lifecycle Tests', () => {
-  let mdxProvider;
-  let context;
+  let provider, view;
+  let sandbox;
 
-  suiteSetup(async () => {
-    // Get the extension and activate it
-    const ext = vscode.extensions.getExtension('controlpanel');
-    if (ext && !ext.isActive) {
-      await ext.activate();
-    }
-    // For testing, we'll need to access the provider differently
-    // This would normally be provided by the extension's exports
-    mdxProvider = null; // Will be mocked or injected for testing
-    
-    // Mock context for testing
-    context = {
-      subscriptions: [],
-      workspaceState: new Map(),
-      globalState: {
-        get: (key) => context.workspaceState.get(key),
-        update: (key, value) => context.workspaceState.set(key, value)
-      },
-      extensionPath: __dirname
-    };
+  setup(() => {
+    sandbox = sinon.createSandbox();
+    ({ provider, view } = createProvider());
   });
 
-  suiteTeardown(async () => {
-    // Cleanup any running processes
-    if (mdxProvider) {
-      await mdxProvider.stopAllTasks();
-    }
+  teardown(() => {
+    sandbox.restore();
   });
 
+  // -----------------------------------------------------------------------
+  //  Task State Transitions (via handleTaskStarted / handleTaskEnded)
+  // -----------------------------------------------------------------------
   suite('Task State Transitions', () => {
-    test('Task startup sequence: not-started -> starting -> running', async function() {
-      this.timeout(10000);
-      
-      if (!mdxProvider) {
-        this.skip();
-        return;
-      }
-
-      const taskLabel = 'test:unit';
-      
-      // Initial state should be not tracked
-      assert.strictEqual(mdxProvider._taskStates.has(taskLabel), false);
-      
-      // Start task - should transition to starting
-      await mdxProvider.executeTask(taskLabel);
-      assert.strictEqual(mdxProvider._taskStates.get(taskLabel), 'starting');
-      
-      // Wait for running state (with timeout)
-      let attempts = 0;
-      while (mdxProvider._taskStates.get(taskLabel) === 'starting' && attempts < 50) {
-        await new Promise(resolve => setTimeout(resolve, 100));
-        attempts++;
-      }
-      
-      assert.strictEqual(mdxProvider._taskStates.get(taskLabel), 'running');
-      assert.ok(mdxProvider._runningTasks.has(taskLabel));
-      
-      // Cleanup
-      await mdxProvider.stopTask(taskLabel);
+    test('handleTaskStarted sets state to running', () => {
+      provider.handleTaskStarted(createStartEvent('build'));
+      assert.strictEqual(provider._taskStates.get('build'), 'running');
     });
 
-    test('Task termination sequence: running -> stopping -> stopped', async function() {
-      this.timeout(15000);
-      
-      if (!mdxProvider) {
-        this.skip();
-        return;
-      }
-
-      const taskLabel = 'test:slow';
-      
-      // Start a long-running task
-      await mdxProvider.executeTask(taskLabel);
-      
-      // Wait for running state
-      let attempts = 0;
-      while (mdxProvider._taskStates.get(taskLabel) !== 'running' && attempts < 50) {
-        await new Promise(resolve => setTimeout(resolve, 100));
-        attempts++;
-      }
-      
-      assert.strictEqual(mdxProvider._taskStates.get(taskLabel), 'running');
-      
-      // Stop the task
-      await mdxProvider.stopTask(taskLabel);
-      assert.strictEqual(mdxProvider._taskStates.get(taskLabel), 'stopping');
-      
-      // Wait for stopped state
-      attempts = 0;
-      while (mdxProvider._taskStates.get(taskLabel) === 'stopping' && attempts < 100) {
-        await new Promise(resolve => setTimeout(resolve, 100));
-        attempts++;
-      }
-      
-      assert.strictEqual(mdxProvider._taskStates.get(taskLabel), 'stopped');
-      assert.strictEqual(mdxProvider._runningTasks.has(taskLabel), false);
+    test('handleTaskStarted records the execution', () => {
+      const event = createStartEvent('build');
+      provider.handleTaskStarted(event);
+      assert.ok(provider._runningTasks.has('build'));
+      assert.strictEqual(provider._runningTasks.get('build'), event.execution);
     });
 
-    test('Failed task state: running -> failed', async function() {
-      this.timeout(10000);
-      
-      if (!mdxProvider) {
-        this.skip();
-        return;
-      }
+    test('handleTaskStarted records start time', () => {
+      const before = Date.now();
+      provider.handleTaskStarted(createStartEvent('build'));
+      const after = Date.now();
+      const startTime = provider._taskStartTimes.get('build');
+      assert.ok(startTime >= before && startTime <= after);
+    });
 
-      const taskLabel = 'fail:exit1';
-      
-      // Start a task that will fail
-      await mdxProvider.executeTask(taskLabel);
-      
-      // Wait for failure
-      let attempts = 0;
-      while (!mdxProvider._taskStates.has(taskLabel) || 
-             (mdxProvider._taskStates.get(taskLabel) !== 'failed' && 
-              mdxProvider._taskStates.get(taskLabel) !== 'stopped')) {
-        await new Promise(resolve => setTimeout(resolve, 100));
-        attempts++;
-        if (attempts > 100) break; // 10 second timeout
-      }
-      
-      assert.strictEqual(mdxProvider._taskStates.get(taskLabel), 'failed');
-      assert.ok(mdxProvider._taskFailures.has(taskLabel));
-      
-      const failureInfo = mdxProvider._taskFailures.get(taskLabel);
-      assert.ok(failureInfo);
-      assert.ok(failureInfo.timestamp);
-      assert.strictEqual(failureInfo.exitCode, 1);
+    test('handleTaskStarted clears previous failure', () => {
+      provider._taskFailures.set('build', { exitCode: 1, reason: 'old' });
+      provider.handleTaskStarted(createStartEvent('build'));
+      assert.strictEqual(provider._taskFailures.has('build'), false);
+    });
+
+    test('handleTaskStarted posts taskStarted to webview', async () => {
+      provider.handleTaskStarted(createStartEvent('build'));
+      // getTaskHistory is async — give it a tick
+      await new Promise(r => setTimeout(r, 10));
+      const msgs = view.webview._messages;
+      const started = msgs.find(m => m.type === 'taskStarted' && m.taskLabel === 'build');
+      assert.ok(started, 'should post taskStarted');
+    });
+
+    test('handleTaskEnded with exitCode 0 cleans up state entry', () => {
+      provider.handleTaskStarted(createStartEvent('build'));
+      provider.handleTaskEnded(createEndEvent('build', 0));
+      assert.strictEqual(provider._taskStates.has('build'), false);
+    });
+
+    test('handleTaskEnded with non-zero exitCode cleans up state entry', () => {
+      provider.handleTaskStarted(createStartEvent('build'));
+      provider.handleTaskEnded(createEndEvent('build', 1));
+      assert.strictEqual(provider._taskStates.has('build'), false);
+    });
+
+    test('handleTaskEnded cleans up runningTasks and startTimes', () => {
+      provider.handleTaskStarted(createStartEvent('build'));
+      assert.ok(provider._runningTasks.has('build'));
+      assert.ok(provider._taskStartTimes.has('build'));
+      provider.handleTaskEnded(createEndEvent('build', 0));
+      assert.strictEqual(provider._runningTasks.has('build'), false);
+      assert.strictEqual(provider._taskStartTimes.has('build'), false);
+    });
+
+    test('handleTaskEnded posts taskEnded for success', () => {
+      provider.handleTaskStarted(createStartEvent('build'));
+      provider.handleTaskEnded(createEndEvent('build', 0));
+      const ended = view.webview._messages.find(m => m.type === 'taskEnded' && m.taskLabel === 'build');
+      assert.ok(ended);
+      assert.strictEqual(ended.exitCode, 0);
+    });
+
+    test('handleTaskEnded posts taskFailed for failure', () => {
+      provider.handleTaskStarted(createStartEvent('build'));
+      provider.handleTaskEnded(createEndEvent('build', 2));
+      const failed = view.webview._messages.find(m => m.type === 'taskFailed' && m.taskLabel === 'build');
+      assert.ok(failed);
+      assert.strictEqual(failed.exitCode, 2);
     });
   });
 
-  suite('Process Resource Management', () => {
-    test('Task cleanup on completion', async function() {
-      this.timeout(10000);
-      
-      if (!mdxProvider) {
-        this.skip();
-        return;
-      }
-
-      const taskLabel = 'build:quick';
-      const initialTaskCount = mdxProvider._runningTasks.size;
-      
-      // Start task
-      await mdxProvider.executeTask(taskLabel);
-      
-      // Verify task is tracked
-      assert.ok(mdxProvider._runningTasks.has(taskLabel) || 
-               mdxProvider._taskStates.get(taskLabel) === 'starting');
-      
-      // Wait for completion
-      let attempts = 0;
-      while (mdxProvider._runningTasks.has(taskLabel) && attempts < 100) {
-        await new Promise(resolve => setTimeout(resolve, 100));
-        attempts++;
-      }
-      
-      // Verify cleanup
-      assert.strictEqual(mdxProvider._runningTasks.has(taskLabel), false);
-      assert.strictEqual(mdxProvider._runningTasks.size, initialTaskCount);
+  // -----------------------------------------------------------------------
+  //  Task History
+  // -----------------------------------------------------------------------
+  suite('Task History', () => {
+    test('getTaskHistory returns default for unknown task', async () => {
+      const h = await provider.getTaskHistory('unknown');
+      assert.deepStrictEqual(h, { durations: [], count: 0 });
     });
 
-    test('Memory leak prevention - state maps cleanup', async function() {
-      this.timeout(15000);
-      
-      if (!mdxProvider) {
-        this.skip();
-        return;
-      }
+    test('updateTaskHistory records duration and count', async () => {
+      await provider.updateTaskHistory('build', 1000);
+      const h = await provider.getTaskHistory('build');
+      assert.deepStrictEqual(h.durations, [1000]);
+      assert.strictEqual(h.count, 1);
+    });
 
-      // Run multiple quick tasks
-      const tasks = ['build:quick', 'test:unit', 'lint:check'];
-      for (const task of tasks) {
-        await mdxProvider.executeTask(task);
-        await new Promise(resolve => setTimeout(resolve, 500));
+    test('updateTaskHistory keeps rolling window of 10', async () => {
+      for (let i = 0; i < 12; i++) {
+        await provider.updateTaskHistory('build', i * 100);
       }
-      
-      // Wait for all tasks to complete
-      let attempts = 0;
-      while (mdxProvider._runningTasks.size > 0 && attempts < 200) {
-        await new Promise(resolve => setTimeout(resolve, 100));
-        attempts++;
-      }
-      
-      // Check that temporary state is cleaned up
-      // Note: Some persistent state like task history may remain
-      const finalRunningCount = mdxProvider._runningTasks.size;
-      assert.strictEqual(finalRunningCount, 0, 'Running tasks should be cleaned up');
-      
-      // Start times should be cleaned for completed tasks
-      const activeStartTimes = Array.from(mdxProvider._taskStartTimes.keys()).filter(
-        task => mdxProvider._runningTasks.has(task)
-      );
-      assert.strictEqual(activeStartTimes.length, 0, 'Start times should be cleaned for completed tasks');
+      const h = await provider.getTaskHistory('build');
+      assert.strictEqual(h.durations.length, 10);
+      assert.strictEqual(h.count, 12);
+      assert.strictEqual(h.durations[0], 200); // first two evicted
+    });
+
+    test('handleTaskEnded updates history for successful tasks', async () => {
+      provider.handleTaskStarted(createStartEvent('build'));
+      await new Promise(r => setTimeout(r, 5));
+      provider.handleTaskEnded(createEndEvent('build', 0));
+      await new Promise(r => setTimeout(r, 20));
+      const h = await provider.getTaskHistory('build');
+      assert.strictEqual(h.count, 1);
+    });
+
+    test('handleTaskEnded does NOT update history for failed tasks', async () => {
+      provider.handleTaskStarted(createStartEvent('build'));
+      provider.handleTaskEnded(createEndEvent('build', 1));
+      await new Promise(r => setTimeout(r, 20));
+      const h = await provider.getTaskHistory('build');
+      assert.strictEqual(h.count, 0);
     });
   });
 
-  suite('Terminal Integration', () => {
-    test('Terminal creation and cleanup', async function() {
-      this.timeout(10000);
-      
-      if (!mdxProvider) {
-        this.skip();
-        return;
-      }
+  // -----------------------------------------------------------------------
+  //  Recently Used Tasks
+  // -----------------------------------------------------------------------
+  suite('Recently Used Tasks', () => {
+    test('empty by default', async () => {
+      assert.deepStrictEqual(await provider.getRecentlyUsedTasks(), []);
+    });
 
-      const taskLabel = 'test:quick';
-      const initialTerminalCount = vscode.window.terminals.length;
-      
-      // Start task
-      await mdxProvider.executeTask(taskLabel);
-      
-      // Wait for task to start
-      let attempts = 0;
-      while (mdxProvider._taskStates.get(taskLabel) === 'starting' && attempts < 50) {
-        await new Promise(resolve => setTimeout(resolve, 100));
-        attempts++;
-      }
-      
-      // Should have created a terminal
-      assert.ok(vscode.window.terminals.length >= initialTerminalCount);
-      
-      // Wait for completion
-      attempts = 0;
-      while (mdxProvider._runningTasks.has(taskLabel) && attempts < 100) {
-        await new Promise(resolve => setTimeout(resolve, 100));
-        attempts++;
-      }
-      
-      // Terminal should still exist but task should be cleaned up
-      assert.strictEqual(mdxProvider._runningTasks.has(taskLabel), false);
+    test('addRecentlyUsedTask prepends', async () => {
+      await provider.addRecentlyUsedTask('build');
+      await provider.addRecentlyUsedTask('test');
+      assert.deepStrictEqual(await provider.getRecentlyUsedTasks(), ['test', 'build']);
+    });
+
+    test('deduplicates by moving to front', async () => {
+      await provider.addRecentlyUsedTask('build');
+      await provider.addRecentlyUsedTask('test');
+      await provider.addRecentlyUsedTask('build');
+      assert.deepStrictEqual(await provider.getRecentlyUsedTasks(), ['build', 'test']);
+    });
+
+    test('caps at 5 entries', async () => {
+      for (let i = 0; i < 7; i++) await provider.addRecentlyUsedTask(`t${i}`);
+      assert.strictEqual((await provider.getRecentlyUsedTasks()).length, 5);
+    });
+
+    test('posts updateRecentlyUsed to webview', async () => {
+      await provider.addRecentlyUsedTask('build');
+      assert.ok(view.webview._messages.find(m => m.type === 'updateRecentlyUsed'));
     });
   });
 
-  suite('State Persistence', () => {
-    test('Task history persistence', async function() {
-      this.timeout(10000);
-      
-      if (!mdxProvider) {
-        this.skip();
-        return;
-      }
+  // -----------------------------------------------------------------------
+  //  Starred Tasks
+  // -----------------------------------------------------------------------
+  suite('Starred Tasks', () => {
+    test('empty by default', async () => {
+      assert.deepStrictEqual(await provider.getStarredTasks(), []);
+    });
 
-      const taskLabel = 'build:test-history';
-      
-      // Clear existing history
-      await context.globalState.update('taskHistory', []);
-      
-      // Run a task
-      await mdxProvider.executeTask(taskLabel);
-      
-      // Wait for completion
-      let attempts = 0;
-      while (mdxProvider._runningTasks.has(taskLabel) && attempts < 100) {
-        await new Promise(resolve => setTimeout(resolve, 100));
-        attempts++;
+    test('toggleStarTask stars a task', async () => {
+      await provider.toggleStarTask('build');
+      assert.deepStrictEqual(await provider.getStarredTasks(), ['build']);
+    });
+
+    test('toggleStarTask unstars a task', async () => {
+      await provider.toggleStarTask('build');
+      await provider.toggleStarTask('build');
+      assert.deepStrictEqual(await provider.getStarredTasks(), []);
+    });
+
+    test('caps at 20 starred tasks', async () => {
+      for (let i = 0; i < 20; i++) await provider.toggleStarTask(`t${i}`);
+      const result = await provider.toggleStarTask('overflow');
+      assert.strictEqual(result.length, 20);
+      assert.ok(!result.includes('overflow'));
+    });
+
+    test('posts updateStarred to webview', async () => {
+      await provider.toggleStarTask('build');
+      assert.ok(view.webview._messages.find(m => m.type === 'updateStarred'));
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  //  Navigation History
+  // -----------------------------------------------------------------------
+  suite('Navigation History', () => {
+    test('defaults to empty / -1', async () => {
+      assert.deepStrictEqual(await provider.getNavigationHistory(), []);
+      assert.strictEqual(await provider.getNavigationIndex(), -1);
+    });
+
+    test('updateNavigationHistory persists and notifies', async () => {
+      await provider.updateNavigationHistory(['a.mdx', 'b.mdx'], 1);
+      assert.deepStrictEqual(await provider.getNavigationHistory(), ['a.mdx', 'b.mdx']);
+      assert.strictEqual(await provider.getNavigationIndex(), 1);
+      assert.ok(view.webview._messages.find(m => m.type === 'updateNavigationHistory'));
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  //  Execution History
+  // -----------------------------------------------------------------------
+  suite('Execution History', () => {
+    test('empty by default', async () => {
+      assert.deepStrictEqual(await provider.getExecutionHistory(), []);
+    });
+
+    test('addExecutionRecord prepends', async () => {
+      await provider.addExecutionRecord({ id: '1', taskLabel: 'build' });
+      await provider.addExecutionRecord({ id: '2', taskLabel: 'test' });
+      const h = await provider.getExecutionHistory();
+      assert.strictEqual(h[0].taskLabel, 'test');
+    });
+
+    test('caps at 20 entries', async () => {
+      for (let i = 0; i < 25; i++) {
+        await provider.addExecutionRecord({ id: `${i}`, taskLabel: `t${i}` });
       }
-      
-      // Check that history was updated
-      const history = context.globalState.get('taskHistory') || [];
-      const historyEntry = history.find(h => h.label === taskLabel);
-      assert.ok(historyEntry, 'Task should be recorded in history');
-      assert.ok(historyEntry.lastRun, 'Task should have lastRun timestamp');
+      assert.strictEqual((await provider.getExecutionHistory()).length, 20);
+    });
+
+    test('handleTaskEnded adds execution record', async () => {
+      provider.handleTaskStarted(createStartEvent('build'));
+      provider.handleTaskEnded(createEndEvent('build', 0));
+      await new Promise(r => setTimeout(r, 20));
+      const h = await provider.getExecutionHistory();
+      assert.strictEqual(h.length, 1);
+      assert.strictEqual(h[0].failed, false);
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  //  Subtask Hierarchy
+  // -----------------------------------------------------------------------
+  suite('Subtask Hierarchy', () => {
+    test('addSubtask creates parent-child', () => {
+      provider.addSubtask('p', 'c1');
+      provider.addSubtask('p', 'c2');
+      assert.deepStrictEqual(provider.getTaskHierarchy('p').sort(), ['c1', 'c2']);
+    });
+
+    test('removeSubtask removes child', () => {
+      provider.addSubtask('p', 'c1');
+      provider.addSubtask('p', 'c2');
+      provider.removeSubtask('p', 'c1');
+      assert.deepStrictEqual(provider.getTaskHierarchy('p'), ['c2']);
+    });
+
+    test('removeSubtask cleans up empty parent', () => {
+      provider.addSubtask('p', 'c');
+      provider.removeSubtask('p', 'c');
+      assert.strictEqual(provider._taskHierarchy.has('p'), false);
+    });
+
+    test('getTaskHierarchy returns [] for unknown', () => {
+      assert.deepStrictEqual(provider.getTaskHierarchy('x'), []);
+    });
+
+    test('subtaskStarted posts when child starts', async () => {
+      provider.addSubtask('p', 'c');
+      provider.handleTaskStarted(createStartEvent('c'));
+      await new Promise(r => setTimeout(r, 10));
+      const msg = view.webview._messages.find(m => m.type === 'subtaskStarted');
+      assert.ok(msg);
+      assert.strictEqual(msg.parentLabel, 'p');
+      assert.strictEqual(msg.childLabel, 'c');
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  //  Failed Tasks Persistence
+  // -----------------------------------------------------------------------
+  suite('Failed Tasks Persistence', () => {
+    test('save and retrieve round-trip', async () => {
+      await provider.saveFailedTask('build', { exitCode: 1, reason: 'error' });
+      const f = await provider.getPersistedFailedTasks();
+      assert.strictEqual(f.build.exitCode, 1);
+    });
+
+    test('clearFailedTask removes entry', async () => {
+      await provider.saveFailedTask('build', { exitCode: 1 });
+      await provider.clearFailedTask('build');
+      const f = await provider.getPersistedFailedTasks();
+      assert.strictEqual(f.build, undefined);
     });
   });
 });

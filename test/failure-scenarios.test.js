@@ -1,361 +1,378 @@
+/**
+ * Failure Scenario Tests
+ *
+ * Tests failure handling, failure propagation through the hierarchy,
+ * persisted failure state, and the stopTask escalation sequence.
+ */
+
 const assert = require('assert');
-const vscode = require('./vscode-mock');
+const sinon = require('sinon');
+const {
+  createProvider,
+  createStartEvent,
+  createEndEvent,
+  vscode,
+} = require('./helpers/provider-factory');
 
 suite('Failure Scenario Tests', () => {
-  let mdxProvider;
-  let context;
+  let provider, view;
+  let sandbox;
 
-  suiteSetup(async () => {
-    const ext = vscode.extensions.getExtension('controlpanel');
-    if (ext && !ext.isActive) {
-      await ext.activate();
-    }
-    mdxProvider = null; // Will be mocked for testing
-    
-    context = {
-      subscriptions: [],
-      workspaceState: new Map(),
-      globalState: {
-        get: (key) => context.workspaceState.get(key),
-        update: (key, value) => context.workspaceState.set(key, value)
-      },
-      extensionPath: __dirname
-    };
+  setup(() => {
+    sandbox = sinon.createSandbox();
+    ({ provider, view } = createProvider());
   });
 
-  suiteTeardown(async () => {
-    if (mdxProvider) {
-      await mdxProvider.stopAllTasks();
-    }
+  teardown(() => {
+    sandbox.restore();
   });
 
+  // -----------------------------------------------------------------------
+  //  Task Failure Handling
+  // -----------------------------------------------------------------------
   suite('Task Failure Handling', () => {
-    test('Exit code 1 failure handling', async function() {
-      this.timeout(10000);
-      
-      if (!mdxProvider) {
-        this.skip();
-        return;
-      }
-
-      const taskLabel = 'fail:exit1';
-      
-      await mdxProvider.executeTask(taskLabel);
-      
-      // Wait for failure
-      let attempts = 0;
-      while (!mdxProvider._taskFailures.has(taskLabel) && attempts < 100) {
-        await new Promise(resolve => setTimeout(resolve, 100));
-        attempts++;
-      }
-      
-      assert.ok(mdxProvider._taskFailures.has(taskLabel));
-      const failure = mdxProvider._taskFailures.get(taskLabel);
-      assert.strictEqual(failure.exitCode, 1);
-      assert.strictEqual(mdxProvider._taskStates.get(taskLabel), 'failed');
+    test('exit code 1 sets failure state', () => {
+      provider.handleTaskStarted(createStartEvent('build'));
+      provider.handleTaskEnded(createEndEvent('build', 1));
+      assert.strictEqual(provider._taskStates.has('build'), false);
+      assert.ok(provider._taskFailures.has('build'));
+      assert.strictEqual(provider._taskFailures.get('build').exitCode, 1);
     });
 
-    test('Exit code 127 (command not found) failure handling', async function() {
-      this.timeout(10000);
-      
-      if (!mdxProvider) {
-        this.skip();
-        return;
-      }
-
-      const taskLabel = 'fail:exit127';
-      
-      await mdxProvider.executeTask(taskLabel);
-      
-      // Wait for failure
-      let attempts = 0;
-      while (!mdxProvider._taskFailures.has(taskLabel) && attempts < 100) {
-        await new Promise(resolve => setTimeout(resolve, 100));
-        attempts++;
-      }
-      
-      assert.ok(mdxProvider._taskFailures.has(taskLabel));
-      const failure = mdxProvider._taskFailures.get(taskLabel);
-      assert.strictEqual(failure.exitCode, 127);
-      assert.strictEqual(mdxProvider._taskStates.get(taskLabel), 'failed');
+    test('exit code 127 (command not found) sets failure state', () => {
+      provider.handleTaskStarted(createStartEvent('missing'));
+      provider.handleTaskEnded(createEndEvent('missing', 127));
+      assert.strictEqual(provider._taskStates.has('missing'), false);
+      assert.strictEqual(provider._taskFailures.get('missing').exitCode, 127);
     });
 
-    test('Timeout failure handling', async function() {
-      this.timeout(15000);
-      
-      if (!mdxProvider) {
-        this.skip();
-        return;
-      }
+    test('exit code 0 does NOT set failure state', () => {
+      provider.handleTaskStarted(createStartEvent('build'));
+      provider.handleTaskEnded(createEndEvent('build', 0));
+      assert.strictEqual(provider._taskStates.has('build'), false);
+      assert.strictEqual(provider._taskFailures.has('build'), false);
+    });
 
-      const taskLabel = 'fail:timeout';
-      
-      await mdxProvider.executeTask(taskLabel);
-      
-      // Wait for the task to start
-      let attempts = 0;
-      while (mdxProvider._taskStates.get(taskLabel) === 'starting' && attempts < 50) {
-        await new Promise(resolve => setTimeout(resolve, 100));
-        attempts++;
-      }
-      
-      assert.strictEqual(mdxProvider._taskStates.get(taskLabel), 'running');
-      
-      // Stop the long-running task to simulate timeout
-      await mdxProvider.stopTask(taskLabel);
-      
-      // Verify cleanup
-      attempts = 0;
-      while (mdxProvider._taskStates.get(taskLabel) === 'stopping' && attempts < 100) {
-        await new Promise(resolve => setTimeout(resolve, 100));
-        attempts++;
-      }
-      
-      assert.strictEqual(mdxProvider._runningTasks.has(taskLabel), false);
+    test('failure info includes reason, timestamp, and duration', () => {
+      provider.handleTaskStarted(createStartEvent('build'));
+      provider.handleTaskEnded(createEndEvent('build', 1));
+      const info = provider._taskFailures.get('build');
+      assert.ok(info.reason);
+      assert.ok(info.timestamp);
+      assert.ok(info.duration !== undefined);
+    });
+
+    test('failure persists to globalState', async () => {
+      provider.handleTaskStarted(createStartEvent('build'));
+      provider.handleTaskEnded(createEndEvent('build', 1));
+      // saveFailedTask is async fire-and-forget, give it a tick
+      await new Promise(r => setTimeout(r, 10));
+      const persisted = await provider.getPersistedFailedTasks();
+      assert.ok(persisted.build);
+      assert.strictEqual(persisted.build.exitCode, 1);
+    });
+
+    test('re-running a task clears previous failure from globalState', async () => {
+      // Fail the task
+      provider.handleTaskStarted(createStartEvent('build'));
+      provider.handleTaskEnded(createEndEvent('build', 1));
+      await new Promise(r => setTimeout(r, 10));
+
+      // Re-start clears failure
+      provider.handleTaskStarted(createStartEvent('build'));
+      await new Promise(r => setTimeout(r, 10));
+      const persisted = await provider.getPersistedFailedTasks();
+      assert.strictEqual(persisted.build, undefined);
+    });
+
+    test('taskFailed message is posted to webview', () => {
+      provider.handleTaskStarted(createStartEvent('build'));
+      provider.handleTaskEnded(createEndEvent('build', 1));
+      const msg = view.webview._messages.find(m => m.type === 'taskFailed' && m.taskLabel === 'build');
+      assert.ok(msg);
+      assert.strictEqual(msg.exitCode, 1);
+    });
+
+    test('undefined exitCode is treated as 0 (success)', () => {
+      provider.handleTaskStarted(createStartEvent('build'));
+      provider.handleTaskEnded({ execution: createEndEvent('build').execution, exitCode: undefined });
+      assert.strictEqual(provider._taskStates.has('build'), false);
     });
   });
 
+  // -----------------------------------------------------------------------
+  //  Dependency Chain Failures (propagateTaskFailure)
+  // -----------------------------------------------------------------------
   suite('Dependency Chain Failures', () => {
-    test('Sequential pipeline failure propagation', async function() {
-      this.timeout(15000);
-      
-      if (!mdxProvider) {
-        this.skip();
-        return;
-      }
+    test('child failure propagates to parent', () => {
+      // Set up parent as running with child subtask
+      provider.handleTaskStarted(createStartEvent('parent'));
+      provider.addSubtask('parent', 'child');
+      provider.handleTaskStarted(createStartEvent('child'));
 
-      const taskLabel = 'fail:sequential-pipeline';
-      
-      await mdxProvider.executeTask(taskLabel);
-      
-      // Wait for failure to propagate
-      let attempts = 0;
-      while (!mdxProvider._taskFailures.has(taskLabel) && 
-             mdxProvider._taskStates.get(taskLabel) !== 'failed' && 
-             attempts < 150) {
-        await new Promise(resolve => setTimeout(resolve, 100));
-        attempts++;
-      }
-      
-      // The main task should be marked as failed due to subtask failure
-      assert.ok(mdxProvider._taskStates.get(taskLabel) === 'failed' ||
-               mdxProvider._taskFailures.has(taskLabel));
+      // Child fails
+      provider.handleTaskEnded(createEndEvent('child', 1));
+
+      // Parent should be marked as failed (state cleaned up, failure info persisted)
+      assert.strictEqual(provider._taskStates.has('parent'), false);
+      assert.ok(provider._taskFailures.has('parent'));
+      assert.strictEqual(provider._taskFailures.get('parent').exitCode, -1);
+      assert.ok(provider._taskFailures.get('parent').reason.includes('child'));
     });
 
-    test('Parallel task failure handling', async function() {
-      this.timeout(15000);
-      
-      if (!mdxProvider) {
-        this.skip();
-        return;
-      }
+    test('propagation terminates parent execution', () => {
+      const parentEvent = createStartEvent('parent');
+      provider.handleTaskStarted(parentEvent);
+      provider.addSubtask('parent', 'child');
+      provider.handleTaskStarted(createStartEvent('child'));
 
-      const taskLabel = 'fail:parallel-checks';
-      
-      await mdxProvider.executeTask(taskLabel);
-      
-      // Wait for failure
-      let attempts = 0;
-      while (!mdxProvider._taskFailures.has(taskLabel) && 
-             mdxProvider._taskStates.get(taskLabel) !== 'failed' && 
-             attempts < 150) {
-        await new Promise(resolve => setTimeout(resolve, 100));
-        attempts++;
-      }
-      
-      // Should handle parallel failure gracefully
-      assert.ok(mdxProvider._taskStates.get(taskLabel) === 'failed' ||
-               mdxProvider._taskFailures.has(taskLabel));
+      provider.handleTaskEnded(createEndEvent('child', 1));
+
+      // Parent execution should have been terminated
+      assert.strictEqual(parentEvent.execution._terminated, true);
     });
 
-    test('Nested dependency failure propagation', async function() {
-      this.timeout(20000);
-      
-      if (!mdxProvider) {
-        this.skip();
-        return;
-      }
+    test('propagation cleans up parent tracking', () => {
+      provider.handleTaskStarted(createStartEvent('parent'));
+      provider.addSubtask('parent', 'child');
+      provider.handleTaskStarted(createStartEvent('child'));
 
-      const parentLabel = 'fail:nested-parent';
-      
-      await mdxProvider.executeTask(parentLabel);
-      
-      // Wait for the nested failure to propagate up
-      let attempts = 0;
-      while (!mdxProvider._taskFailures.has(parentLabel) && 
-             mdxProvider._taskStates.get(parentLabel) !== 'failed' && 
-             attempts < 200) {
-        await new Promise(resolve => setTimeout(resolve, 100));
-        attempts++;
-      }
-      
-      // Parent should be marked as failed due to child failure
-      assert.ok(mdxProvider._taskStates.get(parentLabel) === 'failed' ||
-               mdxProvider._taskFailures.has(parentLabel));
-      
-      // Check if the failure propagation recorded the child that failed
-      if (mdxProvider._taskFailures.has(parentLabel)) {
-        const failure = mdxProvider._taskFailures.get(parentLabel);
-        assert.ok(failure);
-        assert.ok(failure.failedSubtask, 'Should record which subtask failed');
-      }
+      provider.handleTaskEnded(createEndEvent('child', 1));
+
+      assert.strictEqual(provider._runningTasks.has('parent'), false);
+      assert.strictEqual(provider._taskStartTimes.has('parent'), false);
     });
-  });
 
-  suite('Circular Dependency Detection', () => {
-    test('Circular dependency prevention', async function() {
-      this.timeout(10000);
-      
-      if (!mdxProvider) {
-        this.skip();
-        return;
-      }
+    test('propagation posts taskFailed for parent', () => {
+      provider.handleTaskStarted(createStartEvent('parent'));
+      provider.addSubtask('parent', 'child');
+      provider.handleTaskStarted(createStartEvent('child'));
 
-      // This test needs to be implemented based on how circular dependencies
-      // are handled in the actual implementation
-      // For now, we'll test that the system doesn't hang indefinitely
-      
-      const testStartTime = Date.now();
-      
-      try {
-        // Try to execute a task that might have circular dependencies
-        // This should either succeed or fail quickly, not hang
-        await mdxProvider.executeTask('test:circular-dependency');
-      } catch (error) {
-        // Expected if circular dependency is detected
-        const testDuration = Date.now() - testStartTime;
-        assert.ok(testDuration < 5000, 'Circular dependency detection should be fast');
-      }
-      
-      const testDuration = Date.now() - testStartTime;
-      assert.ok(testDuration < 5000, 'Task execution should not hang indefinitely');
+      provider.handleTaskEnded(createEndEvent('child', 1));
+
+      const msg = view.webview._messages.find(
+        m => m.type === 'taskFailed' && m.taskLabel === 'parent'
+      );
+      assert.ok(msg);
+      assert.strictEqual(msg.exitCode, -1);
+      assert.ok(msg.failedDependency === 'child');
+    });
+
+    test('propagation reaches grandparents', () => {
+      provider.handleTaskStarted(createStartEvent('gp'));
+      provider.addSubtask('gp', 'parent');
+      provider.handleTaskStarted(createStartEvent('parent'));
+      provider.addSubtask('parent', 'child');
+      provider.handleTaskStarted(createStartEvent('child'));
+
+      provider.handleTaskEnded(createEndEvent('child', 1));
+
+      assert.strictEqual(provider._taskStates.has('parent'), false);
+      assert.strictEqual(provider._taskStates.has('gp'), false);
+    });
+
+    test('propagation is a no-op when parent is not running', () => {
+      // Parent not tracked at all
+      provider.addSubtask('parent', 'child');
+      provider.handleTaskStarted(createStartEvent('child'));
+      // Should not throw
+      provider.handleTaskEnded(createEndEvent('child', 1));
+      assert.strictEqual(provider._taskStates.has('parent'), false);
+    });
+
+    test('failure persists for parent via saveFailedTask', async () => {
+      provider.handleTaskStarted(createStartEvent('parent'));
+      provider.addSubtask('parent', 'child');
+      provider.handleTaskStarted(createStartEvent('child'));
+
+      provider.handleTaskEnded(createEndEvent('child', 1));
+      await new Promise(r => setTimeout(r, 10));
+
+      const persisted = await provider.getPersistedFailedTasks();
+      assert.ok(persisted.parent);
+      assert.ok(persisted.parent.failedDependency === 'child');
     });
   });
 
-  suite('Error Handling Edge Cases', () => {
-    test('Malformed task definition handling', async function() {
-      this.timeout(10000);
-      
-      if (!mdxProvider) {
-        this.skip();
-        return;
-      }
+  // -----------------------------------------------------------------------
+  //  stopTask behaviour
+  // -----------------------------------------------------------------------
+  suite('stopTask', () => {
+    test('stopTask cleans up state and runningTasks', async () => {
+      // Manually put task in running state
+      const task = new vscode.MockTask('build');
+      const execution = new vscode.MockTaskExecution(task);
+      provider._runningTasks.set('build', execution);
+      provider._taskStates.set('build', 'running');
 
-      // Test handling of non-existent task
-      try {
-        await mdxProvider.executeTask('non-existent-task');
-        // Should not throw unhandled exception
-      } catch (error) {
-        // Expected - should handle gracefully
-        assert.ok(error instanceof Error);
-      }
+      await provider.stopTask('build');
+
+      assert.strictEqual(provider._taskStates.has('build'), false);
+      assert.strictEqual(provider._runningTasks.has('build'), false);
     });
 
-    test('VS Code Tasks API failure handling', async function() {
-      this.timeout(10000);
-      
-      if (!mdxProvider) {
-        this.skip();
-        return;
-      }
+    test('stopTask calls execution.terminate()', async () => {
+      const task = new vscode.MockTask('build');
+      const execution = new vscode.MockTaskExecution(task);
+      provider._runningTasks.set('build', execution);
+      provider._taskStates.set('build', 'running');
 
-      // This test would need to mock the VS Code API to simulate failures
-      // For now, we'll test that the provider handles missing task definitions
-      
-      const invalidLabel = 'invalid:task:label:with:too:many:colons';
-      
-      try {
-        await mdxProvider.executeTask(invalidLabel);
-      } catch (error) {
-        // Should handle invalid task labels gracefully
-        assert.ok(error instanceof Error);
-      }
+      await provider.stopTask('build');
+
+      assert.strictEqual(execution._terminated, true);
     });
 
-    test('Concurrent stop operations on same task', async function() {
-      this.timeout(15000);
-      
-      if (!mdxProvider) {
-        this.skip();
-        return;
-      }
+    test('stopTask is a no-op for already stopped tasks', async () => {
+      provider._taskStates.set('build', 'stopped');
+      // no execution registered
+      await provider.stopTask('build');
+      // Should not throw
+      const msg = view.webview._messages.find(
+        m => m.type === 'taskStateChanged' && m.taskLabel === 'build'
+      );
+      assert.ok(msg);
+      assert.strictEqual(msg.state, 'stopped');
+    });
 
-      const taskLabel = 'test:long-running';
-      
-      // Start a long-running task
-      await mdxProvider.executeTask(taskLabel);
-      
-      // Wait for it to be running
-      let attempts = 0;
-      while (mdxProvider._taskStates.get(taskLabel) !== 'running' && attempts < 100) {
-        await new Promise(resolve => setTimeout(resolve, 100));
-        attempts++;
-      }
-      
-      // Attempt to stop it multiple times concurrently
-      const stopPromises = [
-        mdxProvider.stopTask(taskLabel),
-        mdxProvider.stopTask(taskLabel),
-        mdxProvider.stopTask(taskLabel)
-      ];
-      
-      // All stop operations should complete without throwing
-      await Promise.all(stopPromises);
-      
-      // Task should be stopped
-      assert.strictEqual(mdxProvider._runningTasks.has(taskLabel), false);
+    test('stopTask is a no-op for failed tasks', async () => {
+      provider._taskStates.set('build', 'failed');
+      await provider.stopTask('build');
+      // Should not throw, state unchanged
+    });
+
+    test('stopTask guard prevents concurrent stops (stoppingTasks set)', async () => {
+      const task = new vscode.MockTask('build');
+      const execution = new vscode.MockTaskExecution(task);
+      provider._runningTasks.set('build', execution);
+      provider._taskStates.set('build', 'running');
+      provider._stoppingTasks.add('build');
+
+      await provider.stopTask('build');
+      // Since it was already in stoppingTasks, it should be a no-op
+      // The execution should NOT have been terminated
+      assert.strictEqual(execution._terminated, false);
+    });
+
+    test('stopTask posts stopping then stopped states', async () => {
+      const task = new vscode.MockTask('build');
+      const execution = new vscode.MockTaskExecution(task);
+      provider._runningTasks.set('build', execution);
+      provider._taskStates.set('build', 'running');
+
+      await provider.stopTask('build');
+
+      const stateChanges = view.webview._messages.filter(
+        m => m.type === 'taskStateChanged' && m.taskLabel === 'build'
+      );
+      assert.ok(stateChanges.length >= 2);
+      assert.strictEqual(stateChanges[0].state, 'stopping');
+      assert.strictEqual(stateChanges[stateChanges.length - 1].state, 'stopped');
+    });
+
+    test('stopTask removes label from stoppingTasks when done', async () => {
+      const task = new vscode.MockTask('build');
+      const execution = new vscode.MockTaskExecution(task);
+      provider._runningTasks.set('build', execution);
+      provider._taskStates.set('build', 'running');
+
+      await provider.stopTask('build');
+      assert.strictEqual(provider._stoppingTasks.has('build'), false);
+    });
+
+    test('stopTask with children terminates children and cleans hierarchy', async () => {
+      // Set up parent with two children
+      const parentTask = new vscode.MockTask('parent');
+      const parentExec = new vscode.MockTaskExecution(parentTask);
+      provider._runningTasks.set('parent', parentExec);
+      provider._taskStates.set('parent', 'running');
+
+      const child1Task = new vscode.MockTask('child1');
+      const child1Exec = new vscode.MockTaskExecution(child1Task);
+      provider._runningTasks.set('child1', child1Exec);
+      provider._taskStates.set('child1', 'running');
+
+      const child2Task = new vscode.MockTask('child2');
+      const child2Exec = new vscode.MockTaskExecution(child2Task);
+      provider._runningTasks.set('child2', child2Exec);
+      provider._taskStates.set('child2', 'running');
+
+      provider.addSubtask('parent', 'child1');
+      provider.addSubtask('parent', 'child2');
+
+      await provider.stopTask('parent');
+
+      // Children should have been terminated
+      assert.strictEqual(child1Exec._terminated, true);
+      assert.strictEqual(child2Exec._terminated, true);
+
+      // Hierarchy should be cleaned up (removeSubtask was called correctly)
+      assert.deepStrictEqual(provider.getTaskHierarchy('parent'), []);
+
+      // All tasks should be cleaned up from _taskStates
+      assert.strictEqual(provider._taskStates.has('parent'), false);
+      assert.strictEqual(provider._taskStates.has('child1'), false);
+      assert.strictEqual(provider._taskStates.has('child2'), false);
     });
   });
 
-  suite('Framework-Specific Failures', () => {
-    test('Jest test failure handling', async function() {
-      this.timeout(15000);
-      
-      if (!mdxProvider) {
-        this.skip();
-        return;
-      }
+  // -----------------------------------------------------------------------
+  //  runTask
+  // -----------------------------------------------------------------------
+  suite('runTask', () => {
+    test('runTask finds and executes a registered task', async () => {
+      const task = new vscode.MockTask('build');
+      vscode.tasks._registerTask(task);
 
-      const taskLabel = 'fail:jest';
-      
-      await mdxProvider.executeTask(taskLabel);
-      
-      // Wait for Jest failure
-      let attempts = 0;
-      while (!mdxProvider._taskFailures.has(taskLabel) && 
-             mdxProvider._taskStates.get(taskLabel) !== 'failed' && 
-             attempts < 150) {
-        await new Promise(resolve => setTimeout(resolve, 100));
-        attempts++;
-      }
-      
-      assert.ok(mdxProvider._taskStates.get(taskLabel) === 'failed' ||
-               mdxProvider._taskFailures.has(taskLabel));
+      await provider.runTask('build');
+
+      assert.ok(provider._runningTasks.has('build'));
+
+      vscode.tasks._clearTasks();
     });
 
-    test('Pytest failure handling', async function() {
-      this.timeout(15000);
-      
-      if (!mdxProvider) {
-        this.skip();
-        return;
-      }
+    test('runTask shows error for unknown task', async () => {
+      const spy = sandbox.spy(vscode.window, 'showErrorMessage');
+      await provider.runTask('nonexistent');
+      assert.ok(spy.calledOnce);
+      assert.ok(spy.firstCall.args[0].includes('nonexistent'));
+    });
 
-      const taskLabel = 'fail:pytest';
-      
-      await mdxProvider.executeTask(taskLabel);
-      
-      // Wait for pytest failure
-      let attempts = 0;
-      while (!mdxProvider._taskFailures.has(taskLabel) && 
-             mdxProvider._taskStates.get(taskLabel) !== 'failed' && 
-             attempts < 150) {
-        await new Promise(resolve => setTimeout(resolve, 100));
-        attempts++;
-      }
-      
-      assert.ok(mdxProvider._taskStates.get(taskLabel) === 'failed' ||
-               mdxProvider._taskFailures.has(taskLabel));
+    test('runTask clears persisted failure before executing', async () => {
+      await provider.saveFailedTask('build', { exitCode: 1 });
+      const task = new vscode.MockTask('build');
+      vscode.tasks._registerTask(task);
+
+      await provider.runTask('build');
+
+      const persisted = await provider.getPersistedFailedTasks();
+      assert.strictEqual(persisted.build, undefined);
+
+      vscode.tasks._clearTasks();
+    });
+
+    test('runTask adds to recently used', async () => {
+      const task = new vscode.MockTask('build');
+      vscode.tasks._registerTask(task);
+
+      await provider.runTask('build');
+
+      const recent = await provider.getRecentlyUsedTasks();
+      assert.ok(recent.includes('build'));
+
+      vscode.tasks._clearTasks();
+    });
+
+    test('runTask does not post taskStarted prematurely', async () => {
+      const task = new vscode.MockTask('build');
+      vscode.tasks._registerTask(task);
+
+      await provider.runTask('build');
+
+      // taskStarted should NOT be posted by runTask itself — it comes from handleTaskStarted
+      const msg = view.webview._messages.find(m => m.type === 'taskStarted' && m.taskLabel === 'build');
+      assert.strictEqual(msg, undefined);
+
+      vscode.tasks._clearTasks();
     });
   });
 });

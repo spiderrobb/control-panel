@@ -1,383 +1,225 @@
+/**
+ * Concurrency and Race Condition Tests
+ *
+ * Tests concurrent task operations, stopping guards, hierarchy
+ * modifications under concurrency, and webview reconnection.
+ */
+
 const assert = require('assert');
-const vscode = require('./vscode-mock');
+const sinon = require('sinon');
+const {
+  createProvider,
+  createStartEvent,
+  createEndEvent,
+  vscode,
+} = require('./helpers/provider-factory');
 
 suite('Concurrency and Race Condition Tests', () => {
-  let mdxProvider;
-  let context;
+  let provider, view;
+  let sandbox;
 
-  suiteSetup(async () => {
-    const ext = vscode.extensions.getExtension('controlpanel');
-    if (ext && !ext.isActive) {
-      await ext.activate();
-    }
-    mdxProvider = null; // Will be mocked for testing
-    
-    context = {
-      subscriptions: [],
-      workspaceState: new Map(),
-      globalState: {
-        get: (key) => context.workspaceState.get(key),
-        update: (key, value) => context.workspaceState.set(key, value)
-      },
-      extensionPath: __dirname
-    };
+  setup(() => {
+    sandbox = sinon.createSandbox();
+    ({ provider, view } = createProvider());
   });
 
-  suiteTeardown(async () => {
-    if (mdxProvider) {
-      await mdxProvider.stopAllTasks();
-    }
+  teardown(() => {
+    sandbox.restore();
+    vscode.tasks._clearTasks();
   });
 
+  // -----------------------------------------------------------------------
+  //  Concurrent Task Starts
+  // -----------------------------------------------------------------------
   suite('Concurrent Task Execution', () => {
-    test('Multiple simultaneous task starts', async function() {
-      this.timeout(20000);
-      
-      if (!mdxProvider) {
-        this.skip();
-        return;
-      }
+    test('multiple simultaneous handleTaskStarted for different tasks', () => {
+      provider.handleTaskStarted(createStartEvent('build'));
+      provider.handleTaskStarted(createStartEvent('test'));
+      provider.handleTaskStarted(createStartEvent('lint'));
 
-      const tasks = ['test:unit', 'test:integration', 'lint:check', 'build:quick'];
-      
-      // Start all tasks simultaneously
-      const startPromises = tasks.map(task => mdxProvider.executeTask(task));
-      await Promise.all(startPromises);
-      
-      // Verify all tasks are tracked
-      let allStarted = false;
-      let attempts = 0;
-      while (!allStarted && attempts < 100) {
-        allStarted = tasks.every(task => 
-          mdxProvider._taskStates.has(task) && 
-          (mdxProvider._taskStates.get(task) === 'running' || 
-           mdxProvider._taskStates.get(task) === 'starting')
-        );
-        if (!allStarted) {
-          await new Promise(resolve => setTimeout(resolve, 100));
-          attempts++;
-        }
-      }
-      
-      assert.ok(allStarted, 'All tasks should start successfully');
-      
-      // Wait for completion and cleanup
-      attempts = 0;
-      while (mdxProvider._runningTasks.size > 0 && attempts < 200) {
-        await new Promise(resolve => setTimeout(resolve, 100));
-        attempts++;
-      }
+      assert.strictEqual(provider._runningTasks.size, 3);
+      assert.strictEqual(provider._taskStates.get('build'), 'running');
+      assert.strictEqual(provider._taskStates.get('test'), 'running');
+      assert.strictEqual(provider._taskStates.get('lint'), 'running');
     });
 
-    test('Rapid start/stop cycles on same task', async function() {
-      this.timeout(15000);
-      
-      if (!mdxProvider) {
-        this.skip();
-        return;
-      }
+    test('rapid start/stop on the same task label', async () => {
+      // Start
+      provider.handleTaskStarted(createStartEvent('build'));
+      assert.strictEqual(provider._taskStates.get('build'), 'running');
 
-      const taskLabel = 'test:rapid-cycle';
-      const cycles = 5;
-      
-      for (let i = 0; i < cycles; i++) {
-        // Start task
-        await mdxProvider.executeTask(taskLabel);
-        
-        // Wait a bit for it to start
-        await new Promise(resolve => setTimeout(resolve, 200));
-        
-        // Stop it immediately
-        await mdxProvider.stopTask(taskLabel);
-        
-        // Wait for cleanup
-        let attempts = 0;
-        while (mdxProvider._runningTasks.has(taskLabel) && attempts < 50) {
-          await new Promise(resolve => setTimeout(resolve, 100));
-          attempts++;
-        }
-        
-        assert.strictEqual(mdxProvider._runningTasks.has(taskLabel), false, 
-          `Cycle ${i}: Task should be stopped`);
-      }
+      // End
+      provider.handleTaskEnded(createEndEvent('build', 0));
+      assert.strictEqual(provider._taskStates.has('build'), false);
+
+      // Start again
+      provider.handleTaskStarted(createStartEvent('build'));
+      assert.strictEqual(provider._taskStates.get('build'), 'running');
+      assert.ok(provider._runningTasks.has('build'));
     });
 
-    test('Concurrent task operations with shared resources', async function() {
-      this.timeout(20000);
-      
-      if (!mdxProvider) {
-        this.skip();
-        return;
-      }
+    test('concurrent runTask calls for different tasks', async () => {
+      vscode.tasks._registerTask(new vscode.MockTask('build'));
+      vscode.tasks._registerTask(new vscode.MockTask('test'));
+      vscode.tasks._registerTask(new vscode.MockTask('lint'));
 
-      const buildTasks = ['build:all', 'build:production', 'build:watch'];
-      
-      // Start build tasks concurrently (they might share build directories)
-      const startPromises = buildTasks.map(task => mdxProvider.executeTask(task));
-      await Promise.all(startPromises);
-      
-      // Let them run for a bit
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      
-      // Stop all concurrently
-      const stopPromises = buildTasks.map(task => mdxProvider.stopTask(task));
-      await Promise.all(stopPromises);
-      
-      // Verify all stopped
-      let attempts = 0;
-      while (buildTasks.some(task => mdxProvider._runningTasks.has(task)) && attempts < 100) {
-        await new Promise(resolve => setTimeout(resolve, 100));
-        attempts++;
-      }
-      
-      buildTasks.forEach(task => {
-        assert.strictEqual(mdxProvider._runningTasks.has(task), false, 
-          `${task} should be stopped`);
-      });
+      // Fire all concurrently
+      await Promise.all([
+        provider.runTask('build'),
+        provider.runTask('test'),
+        provider.runTask('lint'),
+      ]);
+
+      assert.ok(provider._runningTasks.has('build'));
+      assert.ok(provider._runningTasks.has('test'));
+      assert.ok(provider._runningTasks.has('lint'));
     });
   });
 
+  // -----------------------------------------------------------------------
+  //  Stopping Guards
+  // -----------------------------------------------------------------------
   suite('Race Condition Prevention', () => {
-    test('Concurrent state modifications', async function() {
-      this.timeout(15000);
-      
-      if (!mdxProvider) {
-        this.skip();
-        return;
-      }
+    test('_stoppingTasks prevents re-entrant stopTask', async () => {
+      const task = new vscode.MockTask('build');
+      const execution = new vscode.MockTaskExecution(task);
+      provider._runningTasks.set('build', execution);
+      provider._taskStates.set('build', 'running');
 
-      const taskLabel = 'test:state-race';
-      const operations = 10;
-      
-      // Perform many concurrent operations on the same task
-      const promises = [];
-      
-      for (let i = 0; i < operations; i++) {
-        if (i % 2 === 0) {
-          promises.push(mdxProvider.executeTask(taskLabel));
-        } else {
-          promises.push(mdxProvider.stopTask(taskLabel));
-        }
-      }
-      
-      // All operations should complete without throwing
-      await Promise.allSettled(promises);
-      
-      // Final state should be consistent
-      const isRunning = mdxProvider._runningTasks.has(taskLabel);
-      const taskState = mdxProvider._taskStates.get(taskLabel);
-      
-      if (isRunning) {
-        assert.ok(['starting', 'running'].includes(taskState));
-      } else {
-        assert.ok(!taskState || ['stopped', 'failed', 'stopping'].includes(taskState));
-      }
+      // Simulate that stopTask is already in progress
+      provider._stoppingTasks.add('build');
+
+      await provider.stopTask('build');
+      // execution should NOT have been terminated because the guard fired
+      assert.strictEqual(execution._terminated, false);
     });
 
-    test('Concurrent task hierarchy modifications', async function() {
-      this.timeout(20000);
-      
-      if (!mdxProvider) {
-        this.skip();
-        return;
-      }
+    test('concurrent stopTask calls - second is a no-op', async () => {
+      const task = new vscode.MockTask('build');
+      const execution = new vscode.MockTaskExecution(task);
+      provider._runningTasks.set('build', execution);
+      provider._taskStates.set('build', 'running');
 
-      const parentTasks = ['build:complex-parent-1', 'build:complex-parent-2'];
-      
-      // Start complex tasks with dependencies concurrently
-      const startPromises = parentTasks.map(task => mdxProvider.executeTask(task));
-      await Promise.all(startPromises);
-      
-      // Let them build hierarchy
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
-      // Stop them concurrently while hierarchy is being modified
-      const stopPromises = parentTasks.map(task => mdxProvider.stopTask(task));
-      await Promise.all(stopPromises);
-      
-      // Wait for cleanup
-      let attempts = 0;
-      while (parentTasks.some(task => mdxProvider._runningTasks.has(task)) && attempts < 200) {
-        await new Promise(resolve => setTimeout(resolve, 100));
-        attempts++;
-      }
-      
-      // Hierarchy should be cleaned up
-      parentTasks.forEach(task => {
-        assert.strictEqual(mdxProvider._runningTasks.has(task), false);
-      });
+      // Fire two stops concurrently
+      const [r1, r2] = await Promise.allSettled([
+        provider.stopTask('build'),
+        provider.stopTask('build'),
+      ]);
+
+      // Both should settle (no throws)
+      assert.strictEqual(r1.status, 'fulfilled');
+      assert.strictEqual(r2.status, 'fulfilled');
+
+      // Task should be stopped
+      assert.strictEqual(provider._taskStates.has('build'), false);
+      assert.strictEqual(provider._stoppingTasks.has('build'), false);
     });
 
-    test('Webview reconnection during task execution', async function() {
-      this.timeout(15000);
-      
-      if (!mdxProvider) {
-        this.skip();
-        return;
-      }
+    test('stopTask on non-existent task is safe', async () => {
+      await provider.stopTask('ghost');
+      // Should not throw; should post a state message
+      const msg = view.webview._messages.find(
+        m => m.type === 'taskStateChanged' && m.taskLabel === 'ghost'
+      );
+      assert.ok(msg);
+    });
 
-      const taskLabel = 'test:webview-reconnect';
-      
-      // Start a task
-      await mdxProvider.executeTask(taskLabel);
-      
-      // Wait for it to be running
-      let attempts = 0;
-      while (mdxProvider._taskStates.get(taskLabel) !== 'running' && attempts < 50) {
-        await new Promise(resolve => setTimeout(resolve, 100));
-        attempts++;
-      }
-      
-      // Simulate webview reconnection by calling refresh methods if they exist
-      if (typeof mdxProvider.refreshWebview === 'function') {
-        await mdxProvider.refreshWebview();
-      }
-      if (typeof mdxProvider._updateWebview === 'function') {
-        await mdxProvider._updateWebview();
-      }
-      
-      // Task should still be running after webview operations
-      assert.strictEqual(mdxProvider._taskStates.get(taskLabel), 'running');
-      assert.ok(mdxProvider._runningTasks.has(taskLabel));
-      
-      // Cleanup
-      await mdxProvider.stopTask(taskLabel);
+    test('concurrent state modifications via handleTaskStarted', () => {
+      // Start the same task twice rapidly (simulating duplicate events)
+      const event1 = createStartEvent('build');
+      const event2 = createStartEvent('build');
+      provider.handleTaskStarted(event1);
+      provider.handleTaskStarted(event2);
+
+      // Guard prevents duplicate — first event's execution is retained
+      assert.strictEqual(provider._taskStates.get('build'), 'running');
+      assert.strictEqual(provider._runningTasks.get('build'), event1.execution);
     });
   });
 
-  suite('Load Testing', () => {
-    test('High-frequency task operations', async function() {
-      this.timeout(30000);
-      
-      if (!mdxProvider) {
-        this.skip();
-        return;
-      }
+  // -----------------------------------------------------------------------
+  //  Hierarchy Modifications Under Concurrency
+  // -----------------------------------------------------------------------
+  suite('Concurrent Hierarchy Modifications', () => {
+    test('concurrent addSubtask / removeSubtask', () => {
+      provider.addSubtask('parent', 'child1');
+      provider.addSubtask('parent', 'child2');
+      provider.addSubtask('parent', 'child3');
+      provider.removeSubtask('parent', 'child1');
 
-      const operations = 50;
-      const tasks = ['test:unit', 'lint:check', 'build:quick'];
-      const startTime = Date.now();
-      
-      // Perform many rapid operations
-      for (let i = 0; i < operations; i++) {
-        const task = tasks[i % tasks.length];
-        await mdxProvider.executeTask(task);
-        
-        // Some operations stop immediately, some let run
-        if (i % 3 === 0) {
-          await mdxProvider.stopTask(task);
-        }
-        
-        // Small delay to prevent overwhelming
-        if (i % 10 === 0) {
-          await new Promise(resolve => setTimeout(resolve, 100));
-        }
-      }
-      
-      const duration = Date.now() - startTime;
-      console.log(`Completed ${operations} operations in ${duration}ms`);
-      
-      // Stop all remaining tasks
-      await mdxProvider.stopAllTasks();
-      
-      // System should be responsive
-      assert.ok(duration < 25000, 'Operations should complete in reasonable time');
-      assert.strictEqual(mdxProvider._runningTasks.size, 0);
+      const children = provider.getTaskHierarchy('parent');
+      assert.strictEqual(children.length, 2);
+      assert.ok(children.includes('child2'));
+      assert.ok(children.includes('child3'));
     });
 
-    test('Memory stability under load', async function() {
-      this.timeout(25000);
-      
-      if (!mdxProvider) {
-        this.skip();
-        return;
-      }
-
-      const initialMemory = process.memoryUsage();
-      const iterations = 20;
-      
-      for (let i = 0; i < iterations; i++) {
-        // Start multiple tasks
-        const tasks = ['test:memory-1', 'test:memory-2', 'build:memory'];
-        await Promise.all(tasks.map(task => mdxProvider.executeTask(task)));
-        
-        // Let them run briefly
-        await new Promise(resolve => setTimeout(resolve, 200));
-        
-        // Stop all
-        await Promise.all(tasks.map(task => mdxProvider.stopTask(task)));
-        
-        // Wait for cleanup
-        let attempts = 0;
-        while (mdxProvider._runningTasks.size > 0 && attempts < 50) {
-          await new Promise(resolve => setTimeout(resolve, 100));
-          attempts++;
-        }
-        
-        // Force garbage collection if available
-        if (global.gc) {
-          global.gc();
-        }
-      }
-      
-      const finalMemory = process.memoryUsage();
-      const memoryIncrease = finalMemory.heapUsed - initialMemory.heapUsed;
-      
-      console.log(`Memory increase: ${Math.round(memoryIncrease / 1024 / 1024)}MB`);
-      
-      // Memory increase should be reasonable (less than 50MB for this test)
-      assert.ok(memoryIncrease < 50 * 1024 * 1024, 'Memory usage should be stable');
+    test('removing all children cleans up parent entry', () => {
+      provider.addSubtask('p', 'c1');
+      provider.addSubtask('p', 'c2');
+      provider.removeSubtask('p', 'c1');
+      provider.removeSubtask('p', 'c2');
+      assert.strictEqual(provider._taskHierarchy.has('p'), false);
     });
 
-    test('Task state consistency under concurrent load', async function() {
-      this.timeout(20000);
-      
-      if (!mdxProvider) {
-        this.skip();
-        return;
-      }
+    test('handleTaskEnded cleans up hierarchy for the ended task', () => {
+      provider.handleTaskStarted(createStartEvent('parent'));
+      provider.addSubtask('parent', 'child');
+      provider.handleTaskStarted(createStartEvent('child'));
 
-      const taskLabel = 'test:consistency';
-      const concurrent = 10;
-      
-      // Start many concurrent operations on the same task
-      const promises = Array(concurrent).fill().map(async (_, i) => {
-        // Stagger operations slightly
-        await new Promise(resolve => setTimeout(resolve, i * 10));
-        
-        try {
-          await mdxProvider.executeTask(taskLabel);
-          await new Promise(resolve => setTimeout(resolve, 100));
-          await mdxProvider.stopTask(taskLabel);
-        } catch (error) {
-          // Some operations may fail due to race conditions, that's ok
-          console.log(`Operation ${i} failed: ${error.message}`);
-        }
-      });
-      
-      await Promise.allSettled(promises);
-      
-      // Final state should be consistent
-      let attempts = 0;
-      while (mdxProvider._runningTasks.has(taskLabel) && attempts < 100) {
-        await new Promise(resolve => setTimeout(resolve, 100));
-        attempts++;
-      }
-      
-      const isRunning = mdxProvider._runningTasks.has(taskLabel);
-      const taskState = mdxProvider._taskStates.get(taskLabel);
-      
-      // State should be consistent
-      if (isRunning) {
-        assert.ok(['starting', 'running'].includes(taskState));
-      } else {
-        assert.ok(!taskState || ['stopped', 'failed', 'stopping'].includes(taskState));
-      }
-      
-      // No state leaks
-      if (!isRunning) {
-        assert.strictEqual(mdxProvider._stoppingTasks?.has(taskLabel), false);
-      }
+      // End parent — its hierarchy entry should be deleted
+      provider.handleTaskEnded(createEndEvent('parent', 0));
+      assert.strictEqual(provider._taskHierarchy.has('parent'), false);
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  //  Webview Reconnection
+  // -----------------------------------------------------------------------
+  suite('Webview Reconnection', () => {
+    test('restoreRunningTasksState re-sends running tasks to webview', async () => {
+      provider.handleTaskStarted(createStartEvent('build'));
+      provider.handleTaskStarted(createStartEvent('test'));
+
+      // Flush microtasks from the .then() inside handleTaskStarted, then clear
+      await new Promise(resolve => setTimeout(resolve, 0));
+      view.webview._messages = [];
+      await provider.restoreRunningTasksState();
+
+      const startedMsgs = view.webview._messages.filter(m => m.type === 'taskStarted');
+      assert.strictEqual(startedMsgs.length, 2);
+    });
+
+    test('restoreRunningTasksState sends taskFailed for failed tasks', async () => {
+      provider.handleTaskStarted(createStartEvent('build'));
+      provider._taskFailures.set('build', { exitCode: 1, reason: 'compile error' });
+
+      view.webview._messages = [];
+      await provider.restoreRunningTasksState();
+
+      const failedMsgs = view.webview._messages.filter(m => m.type === 'taskFailed');
+      assert.strictEqual(failedMsgs.length, 1);
+      assert.strictEqual(failedMsgs[0].taskLabel, 'build');
+    });
+
+    test('restoreRunningTasksState sends persisted failures for non-running tasks', async () => {
+      await provider.saveFailedTask('old-task', { exitCode: 2, reason: 'old error' });
+
+      view.webview._messages = [];
+      await provider.restoreRunningTasksState();
+
+      const failedMsgs = view.webview._messages.filter(m => m.type === 'taskFailed');
+      assert.ok(failedMsgs.find(m => m.taskLabel === 'old-task'));
+    });
+
+    test('restoreNavigationState re-sends navigation history', async () => {
+      await provider.updateNavigationHistory(['a.mdx', 'b.mdx'], 1);
+      view.webview._messages = [];
+
+      await provider.restoreNavigationState();
+
+      const msg = view.webview._messages.find(m => m.type === 'updateNavigationHistory');
+      assert.ok(msg);
+      assert.deepStrictEqual(msg.history, ['a.mdx', 'b.mdx']);
     });
   });
 });

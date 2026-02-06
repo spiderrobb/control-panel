@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import React from 'react';
 import IconButton from '@mui/material/IconButton';
 import Tooltip from '@mui/material/Tooltip';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
@@ -6,8 +6,7 @@ import StarIcon from '@mui/icons-material/Star';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 
-function StarredTasksList({ tasks, onRun, onToggleStar }) {
-  const [isCollapsed, setIsCollapsed] = useState(false);
+function StarredTasksList({ tasks, onRun, onToggleStar, isCollapsed, onToggleCollapsed }) {
 
   return (
     <div className="starred-tasks-panel">
@@ -16,7 +15,7 @@ function StarredTasksList({ tasks, onRun, onToggleStar }) {
         <Tooltip title={isCollapsed ? 'Expand' : 'Collapse'}>
           <IconButton
             size="small"
-            onClick={() => setIsCollapsed(!isCollapsed)}
+            onClick={onToggleCollapsed}
             sx={{ p: 0.5 }}
           >
             {isCollapsed ? <ExpandMoreIcon sx={{ fontSize: 18 }} /> : <ExpandLessIcon sx={{ fontSize: 18 }} />}

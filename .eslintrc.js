@@ -20,7 +20,7 @@ module.exports = {
     }
   },
   rules: {
-    'no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
+    'no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^React$' }],
     'no-console': 'warn',
     'react/prop-types': 'off',
     'react/react-in-jsx-scope': 'off'

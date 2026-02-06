@@ -1,468 +1,364 @@
+/**
+ * Integration / Stress Tests
+ *
+ * Tests bulk operations, file loading with fs stubs, navigation history
+ * management, sendTasksToWebview, getTaskDependencies, resolveWebviewView,
+ * and openTaskDefinition.
+ */
+
 const assert = require('assert');
-const vscode = require('./vscode-mock');
+const sinon = require('sinon');
+const path = require('path');
+const {
+  createProvider,
+  createStartEvent,
+  createEndEvent,
+  stubFs,
+  vscode,
+} = require('./helpers/provider-factory');
+const {
+  SIMPLE_MDX,
+  TASKS_JSON_CONTENT,
+} = require('./fixtures/sample-mdx');
 
 suite('Integration Stress Tests', () => {
-  let mdxProvider;
-  let context;
+  let provider, view;
+  let sandbox;
 
-  suiteSetup(async () => {
-    const ext = vscode.extensions.getExtension('controlpanel');
-    if (ext && !ext.isActive) {
-      await ext.activate();
-    }
-    mdxProvider = null; // Will be mocked for testing
-    
-    context = {
-      subscriptions: [],
-      workspaceState: new Map(),
-      globalState: {
-        get: (key) => context.workspaceState.get(key),
-        update: (key, value) => context.workspaceState.set(key, value)
-      },
-      extensionPath: __dirname
-    };
+  setup(() => {
+    sandbox = sinon.createSandbox();
+    ({ provider, view } = createProvider());
   });
 
-  suiteTeardown(async () => {
-    if (mdxProvider) {
-      await mdxProvider.stopAllTasks();
-    }
+  teardown(() => {
+    sandbox.restore();
+    vscode.tasks._clearTasks();
   });
 
-  suite('High-Volume Task Execution', () => {
-    test('Large task list processing', async function() {
-      this.timeout(60000);
-      
-      if (!mdxProvider) {
-        this.skip();
-        return;
+  // -----------------------------------------------------------------------
+  //  Bulk History Operations
+  // -----------------------------------------------------------------------
+  suite('High-Volume History Operations', () => {
+    test('rapid addExecutionRecord maintains 20-record cap', async () => {
+      for (let i = 0; i < 50; i++) {
+        await provider.addExecutionRecord({ id: `${i}`, taskLabel: `t-${i}` });
       }
-
-      // Define a comprehensive set of tasks from the test workspace
-      const allTasks = [
-        // Build tasks
-        'build:all', 'build:production', 'build:watch', 'build:clean',
-        // Test tasks
-        'test:unit', 'test:integration', 'test:coverage', 'test:smoke',
-        // Lint tasks
-        'lint:check', 'lint:fix',
-        // TypeScript tasks
-        'typescript:check',
-        // Docker tasks
-        'docker:build', 'docker:up', 'docker:down',
-        // Deploy tasks
-        'deploy:staging', 'deploy:production',
-        // Database tasks
-        'db:migrate', 'db:seed', 'db:reset'
-      ];
-
-      const startTime = Date.now();
-      const results = [];
-      
-      // Process tasks in batches to avoid overwhelming the system
-      const batchSize = 3;
-      for (let i = 0; i < allTasks.length; i += batchSize) {
-        const batch = allTasks.slice(i, i + batchSize);
-        
-        // Start batch
-        const batchStartTime = Date.now();
-        await Promise.all(batch.map(task => mdxProvider.executeTask(task)));
-        
-        // Let them run briefly
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        
-        // Stop batch
-        await Promise.all(batch.map(task => mdxProvider.stopTask(task)));
-        
-        // Wait for batch cleanup
-        let attempts = 0;
-        while (batch.some(task => mdxProvider._runningTasks.has(task)) && attempts < 100) {
-          await new Promise(resolve => setTimeout(resolve, 100));
-          attempts++;
-        }
-        
-        const batchDuration = Date.now() - batchStartTime;
-        results.push({
-          batch: i / batchSize + 1,
-          tasks: batch,
-          duration: batchDuration
-        });
-        
-        console.log(`Batch ${i / batchSize + 1}: ${batchDuration}ms for ${batch.length} tasks`);
-      }
-      
-      const totalDuration = Date.now() - startTime;
-      console.log(`Total: ${totalDuration}ms for ${allTasks.length} tasks`);
-      
-      // Verify system stability
-      assert.strictEqual(mdxProvider._runningTasks.size, 0, 'No tasks should be running');
-      assert.ok(totalDuration < 50000, 'Processing should complete in reasonable time');
-      
-      // Check for performance degradation across batches
-      const avgDurations = results.map(r => r.duration);
-      const firstHalfAvg = avgDurations.slice(0, Math.floor(avgDurations.length / 2))
-        .reduce((a, b) => a + b, 0) / Math.floor(avgDurations.length / 2);
-      const secondHalfAvg = avgDurations.slice(Math.floor(avgDurations.length / 2))
-        .reduce((a, b) => a + b, 0) / Math.ceil(avgDurations.length / 2);
-      
-      const degradationRatio = secondHalfAvg / firstHalfAvg;
-      console.log(`Performance degradation ratio: ${degradationRatio.toFixed(2)}`);
-      assert.ok(degradationRatio < 2.0, 'Performance should not degrade significantly');
+      const h = await provider.getExecutionHistory();
+      assert.strictEqual(h.length, 20);
+      // Most recent should be first
+      assert.strictEqual(h[0].id, '49');
     });
 
-    test('Long-running process management', async function() {
-      this.timeout(30000);
-      
-      if (!mdxProvider) {
-        this.skip();
-        return;
+    test('rapid toggleStarTask maintains 20-star cap', async () => {
+      for (let i = 0; i < 30; i++) {
+        await provider.toggleStarTask(`task-${i}`);
       }
+      const starred = await provider.getStarredTasks();
+      assert.strictEqual(starred.length, 20);
+    });
 
-      const longRunningTasks = [
-        'build:watch',  // Typically runs continuously
-        'test:watch',   // Continuous test runner if exists
-        'docker:up'     // Long-running service
-      ];
+    test('updateTaskHistory under load maintains rolling window', async () => {
+      for (let i = 0; i < 100; i++) {
+        await provider.updateTaskHistory('build', i);
+      }
+      const h = await provider.getTaskHistory('build');
+      assert.strictEqual(h.durations.length, 10);
+      assert.strictEqual(h.count, 100);
+    });
 
-      const startTime = Date.now();
-      
-      // Start long-running tasks
-      for (const task of longRunningTasks) {
-        try {
-          await mdxProvider.executeTask(task);
-        } catch (error) {
-          console.log(`Task ${task} not available: ${error.message}`);
-        }
+    test('rapid addRecentlyUsedTask with deduplication', async () => {
+      // Alternate between two tasks rapidly
+      for (let i = 0; i < 20; i++) {
+        await provider.addRecentlyUsedTask(i % 2 === 0 ? 'build' : 'test');
       }
-      
-      // Let them run for extended period
-      console.log('Running long-term processes...');
-      await new Promise(resolve => setTimeout(resolve, 5000));
-      
-      // Verify they're still running (for tasks that started successfully)
-      const runningTasks = Array.from(mdxProvider._runningTasks.keys());
-      const stillRunning = longRunningTasks.filter(task => runningTasks.includes(task));
-      
-      console.log(`Still running: ${stillRunning.join(', ')}`);
-      
-      // Stop all long-running tasks
-      for (const task of longRunningTasks) {
-        try {
-          await mdxProvider.stopTask(task);
-        } catch (error) {
-          console.log(`Error stopping ${task}: ${error.message}`);
-        }
-      }
-      
-      // Wait for cleanup
-      let attempts = 0;
-      while (longRunningTasks.some(task => mdxProvider._runningTasks.has(task)) && attempts < 200) {
-        await new Promise(resolve => setTimeout(resolve, 100));
-        attempts++;
-      }
-      
-      const totalDuration = Date.now() - startTime;
-      console.log(`Long-running test completed in ${totalDuration}ms`);
-      
-      // All should be stopped
-      longRunningTasks.forEach(task => {
-        assert.strictEqual(mdxProvider._runningTasks.has(task), false,
-          `${task} should be stopped`);
-      });
+      const recent = await provider.getRecentlyUsedTasks();
+      assert.ok(recent.length <= 5);
+      // No duplicates
+      const unique = new Set(recent);
+      assert.strictEqual(unique.size, recent.length);
     });
   });
 
-  suite('Complex Dependency Scenarios', () => {
-    test('Deep nested dependency chains', async function() {
-      this.timeout(25000);
-      
-      if (!mdxProvider) {
-        this.skip();
-        return;
-      }
+  // -----------------------------------------------------------------------
+  //  File Loading (with fs stubs)
+  // -----------------------------------------------------------------------
+  suite('File Loading', () => {
+    test('loadMdxFile posts content to webview', async () => {
+      const cpdoxPath = path.join('/workspaces/ControlPanel', '.cpdox', 'test.mdx');
+      stubFs(sandbox, { [cpdoxPath]: SIMPLE_MDX });
 
-      // Test with nested failure scenarios from test workspace
-      const complexTasks = [
-        'fail:nested-parent',     // Should trigger child failures
-        'fail:sequential-pipeline', // Chain of dependent tasks
-        'build:production'        // Complex build with dependencies
-      ];
+      await provider.loadMdxFile('test.mdx');
 
-      for (const task of complexTasks) {
-        const startTime = Date.now();
-        
-        try {
-          await mdxProvider.executeTask(task);
-          
-          // Wait for task to complete or fail
-          let attempts = 0;
-          while (mdxProvider._runningTasks.has(task) && 
-                 !mdxProvider._taskFailures.has(task) && 
-                 attempts < 200) {
-            await new Promise(resolve => setTimeout(resolve, 100));
-            attempts++;
-          }
-          
-          const duration = Date.now() - startTime;
-          console.log(`${task}: ${duration}ms`);
-          
-          // Verify final state is consistent
-          const isRunning = mdxProvider._runningTasks.has(task);
-          const isFailed = mdxProvider._taskFailures.has(task);
-          const state = mdxProvider._taskStates.get(task);
-          
-          if (isRunning) {
-            assert.ok(['starting', 'running'].includes(state));
-          } else {
-            assert.ok(['stopped', 'failed'].includes(state) || isFailed);
-          }
-          
-        } catch (error) {
-          console.log(`Task ${task} handling error: ${error.message}`);
-        }
-        
-        // Cleanup
-        await mdxProvider.stopTask(task);
-      }
+      const msg = view.webview._messages.find(m => m.type === 'loadMdx');
+      assert.ok(msg);
+      assert.strictEqual(msg.content, SIMPLE_MDX);
+      assert.strictEqual(msg.file, 'test.mdx');
     });
 
-    test('Parallel dependency resolution', async function() {
-      this.timeout(20000);
-      
-      if (!mdxProvider) {
-        this.skip();
-        return;
-      }
+    test('loadMdxFile updates navigation history', async () => {
+      const cpdoxPath = path.join('/workspaces/ControlPanel', '.cpdox', 'a.mdx');
+      stubFs(sandbox, { [cpdoxPath]: SIMPLE_MDX });
 
-      const parallelTasks = [
-        'fail:parallel-checks',  // Multiple parallel tasks that may fail
-        'test:unit',             // Independent parallel task
-        'lint:check'             // Another independent task
-      ];
+      await provider.loadMdxFile('a.mdx');
+      const history = await provider.getNavigationHistory();
+      assert.ok(history.includes('a.mdx'));
+    });
 
-      // Start all in parallel
-      const startTime = Date.now();
-      await Promise.all(parallelTasks.map(task => mdxProvider.executeTask(task)));
-      
-      // Monitor execution
-      const checkInterval = setInterval(() => {
-        const running = parallelTasks.filter(task => mdxProvider._runningTasks.has(task));
-        const failed = parallelTasks.filter(task => mdxProvider._taskFailures.has(task));
-        console.log(`Running: ${running.length}, Failed: ${failed.length}`);
-      }, 1000);
-      
-      // Wait for completion/failure
-      let attempts = 0;
-      while (parallelTasks.some(task => mdxProvider._runningTasks.has(task)) && attempts < 150) {
-        await new Promise(resolve => setTimeout(resolve, 100));
-        attempts++;
+    test('loadMdxFile skips history when skipHistory=true', async () => {
+      const cpdoxPath = path.join('/workspaces/ControlPanel', '.cpdox', 'a.mdx');
+      stubFs(sandbox, { [cpdoxPath]: SIMPLE_MDX });
+
+      await provider.loadMdxFile('a.mdx', true);
+      const history = await provider.getNavigationHistory();
+      assert.deepStrictEqual(history, []);
+    });
+
+    test('loadMdxFile shows error for missing file', async () => {
+      stubFs(sandbox, {}); // no files exist
+      const spy = sandbox.spy(vscode.window, 'showErrorMessage');
+      await provider.loadMdxFile('missing.mdx');
+      assert.ok(spy.calledOnce);
+    });
+
+    test('loadMdxFile deduplicates navigation (same file twice)', async () => {
+      const cpdoxPath = path.join('/workspaces/ControlPanel', '.cpdox', 'a.mdx');
+      stubFs(sandbox, { [cpdoxPath]: SIMPLE_MDX });
+
+      await provider.loadMdxFile('a.mdx');
+      await provider.loadMdxFile('a.mdx');
+      const history = await provider.getNavigationHistory();
+      // Should not have duplicate
+      assert.strictEqual(history.filter(h => h === 'a.mdx').length, 1);
+    });
+
+    test('navigation history caps at 10 entries', async () => {
+      const files = {};
+      for (let i = 0; i < 15; i++) {
+        const fp = path.join('/workspaces/ControlPanel', '.cpdox', `f${i}.mdx`);
+        files[fp] = `# File ${i}`;
       }
-      
-      clearInterval(checkInterval);
-      
-      const duration = Date.now() - startTime;
-      console.log(`Parallel execution completed in ${duration}ms`);
-      
-      // Verify all tasks completed (success or failure)
-      parallelTasks.forEach(task => {
-        assert.strictEqual(mdxProvider._runningTasks.has(task), false,
-          `${task} should not be running`);
-      });
+      stubFs(sandbox, files);
+
+      for (let i = 0; i < 15; i++) {
+        await provider.loadMdxFile(`f${i}.mdx`);
+      }
+      const history = await provider.getNavigationHistory();
+      assert.ok(history.length <= 10);
     });
   });
 
-  suite('System Stability Under Stress', () => {
-    test('Rapid task churning', async function() {
-      this.timeout(45000);
-      
-      if (!mdxProvider) {
-        this.skip();
-        return;
+  // -----------------------------------------------------------------------
+  //  Navigation (back / forward / toItem)
+  // -----------------------------------------------------------------------
+  suite('Navigation', () => {
+    test('navigateBack moves index backward', async () => {
+      const files = {};
+      for (const name of ['a.mdx', 'b.mdx']) {
+        files[path.join('/workspaces/ControlPanel', '.cpdox', name)] = '# File';
       }
+      stubFs(sandbox, files);
 
-      const churningTasks = ['test:churn-1', 'test:churn-2', 'build:churn'];
-      const iterations = 25;
-      const startTime = Date.now();
-      
-      for (let i = 0; i < iterations; i++) {
-        // Random task selection
-        const task = churningTasks[Math.floor(Math.random() * churningTasks.length)];
-        
-        // Start task
-        await mdxProvider.executeTask(task);
-        
-        // Random short delay
-        await new Promise(resolve => setTimeout(resolve, Math.random() * 200));
-        
-        // Stop task
-        await mdxProvider.stopTask(task);
-        
-        // Brief cleanup wait
-        let attempts = 0;
-        while (mdxProvider._runningTasks.has(task) && attempts < 20) {
-          await new Promise(resolve => setTimeout(resolve, 50));
-          attempts++;
-        }
-        
-        // Progress indicator
-        if (i % 5 === 0) {
-          console.log(`Churn iteration ${i}/${iterations}`);
-        }
-      }
-      
-      const duration = Date.now() - startTime;
-      console.log(`Churning completed: ${iterations} iterations in ${duration}ms`);
-      
-      // System should be stable
-      assert.strictEqual(mdxProvider._runningTasks.size, 0);
-      assert.ok(duration < 40000, 'Churning should complete in reasonable time');
+      await provider.loadMdxFile('a.mdx');
+      await provider.loadMdxFile('b.mdx');
+      await provider.navigateBack();
+      const idx = await provider.getNavigationIndex();
+      assert.strictEqual(idx, 0);
     });
 
-    test('Memory stress with task variations', async function() {
-      this.timeout(35000);
-      
-      if (!mdxProvider) {
-        this.skip();
-        return;
+    test('navigateForward moves index forward', async () => {
+      const files = {};
+      for (const name of ['a.mdx', 'b.mdx']) {
+        files[path.join('/workspaces/ControlPanel', '.cpdox', name)] = '# File';
       }
+      stubFs(sandbox, files);
 
-      const memoryStressTasks = [
-        'build:all', 'test:coverage', 'lint:check', 'typescript:check',
-        'docker:build', 'test:integration'
-      ];
-
-      const initialMemory = process.memoryUsage();
-      const memorySnapshots = [];
-      
-      // Stress test with varying task patterns
-      for (let cycle = 0; cycle < 8; cycle++) {
-        console.log(`Memory stress cycle ${cycle + 1}/8`);
-        
-        // Pattern 1: Sequential execution
-        for (const task of memoryStressTasks.slice(0, 3)) {
-          await mdxProvider.executeTask(task);
-          await new Promise(resolve => setTimeout(resolve, 300));
-          await mdxProvider.stopTask(task);
-        }
-        
-        // Pattern 2: Parallel burst
-        const parallelBatch = memoryStressTasks.slice(3, 6);
-        await Promise.all(parallelBatch.map(task => mdxProvider.executeTask(task)));
-        await new Promise(resolve => setTimeout(resolve, 500));
-        await Promise.all(parallelBatch.map(task => mdxProvider.stopTask(task)));
-        
-        // Wait for cleanup
-        let attempts = 0;
-        while (mdxProvider._runningTasks.size > 0 && attempts < 100) {
-          await new Promise(resolve => setTimeout(resolve, 100));
-          attempts++;
-        }
-        
-        // Memory snapshot
-        const currentMemory = process.memoryUsage();
-        memorySnapshots.push({
-          cycle: cycle + 1,
-          heapUsed: currentMemory.heapUsed,
-          rss: currentMemory.rss
-        });
-        
-        // Force GC if available
-        if (global.gc && cycle % 2 === 1) {
-          global.gc();
-        }
-      }
-      
-      // Analyze memory trends
-      const finalMemory = process.memoryUsage();
-      const totalHeapIncrease = finalMemory.heapUsed - initialMemory.heapUsed;
-      
-      console.log('Memory progression:');
-      memorySnapshots.forEach(snapshot => {
-        const heapMB = Math.round(snapshot.heapUsed / 1024 / 1024);
-        const rssMB = Math.round(snapshot.rss / 1024 / 1024);
-        console.log(`  Cycle ${snapshot.cycle}: Heap ${heapMB}MB, RSS ${rssMB}MB`);
-      });
-      
-      console.log(`Total heap increase: ${Math.round(totalHeapIncrease / 1024 / 1024)}MB`);
-      
-      // Memory should remain stable
-      assert.ok(totalHeapIncrease < 75 * 1024 * 1024, 'Heap increase should be < 75MB');
-      
-      // Check for memory leak patterns
-      const heapProgression = memorySnapshots.map(s => s.heapUsed);
-      const midPoint = Math.floor(heapProgression.length / 2);
-      const firstHalfAvg = heapProgression.slice(0, midPoint).reduce((a, b) => a + b) / midPoint;
-      const secondHalfAvg = heapProgression.slice(midPoint).reduce((a, b) => a + b) / (heapProgression.length - midPoint);
-      
-      const memoryGrowthRatio = secondHalfAvg / firstHalfAvg;
-      console.log(`Memory growth ratio: ${memoryGrowthRatio.toFixed(2)}`);
-      assert.ok(memoryGrowthRatio < 1.5, 'Memory growth should be limited');
+      await provider.loadMdxFile('a.mdx');
+      await provider.loadMdxFile('b.mdx');
+      await provider.navigateBack();
+      await provider.navigateForward();
+      const idx = await provider.getNavigationIndex();
+      assert.strictEqual(idx, 1);
     });
 
-    test('Extension stability simulation', async function() {
-      this.timeout(40000);
-      
-      if (!mdxProvider) {
-        this.skip();
-        return;
+    test('navigateBack at start is a no-op', async () => {
+      const fp = path.join('/workspaces/ControlPanel', '.cpdox', 'a.mdx');
+      stubFs(sandbox, { [fp]: '# A' });
+
+      await provider.loadMdxFile('a.mdx');
+      const idxBefore = await provider.getNavigationIndex();
+      await provider.navigateBack();
+      assert.strictEqual(await provider.getNavigationIndex(), idxBefore);
+    });
+
+    test('navigateForward at end is a no-op', async () => {
+      const fp = path.join('/workspaces/ControlPanel', '.cpdox', 'a.mdx');
+      stubFs(sandbox, { [fp]: '# A' });
+
+      await provider.loadMdxFile('a.mdx');
+      const idxBefore = await provider.getNavigationIndex();
+      await provider.navigateForward();
+      assert.strictEqual(await provider.getNavigationIndex(), idxBefore);
+    });
+
+    test('navigateToHistoryItem truncates forward history', async () => {
+      const files = {};
+      for (const n of ['a.mdx', 'b.mdx', 'c.mdx']) {
+        files[path.join('/workspaces/ControlPanel', '.cpdox', n)] = '# F';
       }
+      stubFs(sandbox, files);
 
-      const stabilityTasks = [
-        'test:unit', 'build:quick', 'lint:check',
-        'fail:exit1', 'test:integration', 'build:production'
-      ];
+      await provider.loadMdxFile('a.mdx');
+      await provider.loadMdxFile('b.mdx');
+      await provider.loadMdxFile('c.mdx');
 
-      // Simulate extended extension usage
-      const phases = [
-        { name: 'startup', duration: 2000 },
-        { name: 'light-usage', duration: 3000 },
-        { name: 'heavy-usage', duration: 5000 },
-        { name: 'mixed-usage', duration: 4000 }
-      ];
+      await provider.navigateToHistoryItem(0); // go to 'a.mdx'
+      const history = await provider.getNavigationHistory();
+      assert.strictEqual(history.length, 1);
+      assert.strictEqual(history[0], 'a.mdx');
+    });
+  });
 
-      for (const phase of phases) {
-        console.log(`Phase: ${phase.name} (${phase.duration}ms)`);
-        const phaseStart = Date.now();
-        
-        while (Date.now() - phaseStart < phase.duration) {
-          // Different activity patterns per phase
-          if (phase.name === 'startup') {
-            // Light activity
-            const task = stabilityTasks[0];
-            await mdxProvider.executeTask(task);
-            await new Promise(resolve => setTimeout(resolve, 400));
-            await mdxProvider.stopTask(task);
-          } else if (phase.name === 'heavy-usage') {
-            // Multiple concurrent tasks
-            const tasks = stabilityTasks.slice(0, 3);
-            await Promise.all(tasks.map(task => mdxProvider.executeTask(task)));
-            await new Promise(resolve => setTimeout(resolve, 800));
-            await Promise.all(tasks.map(task => mdxProvider.stopTask(task)));
-          } else {
-            // Mixed pattern
-            const task = stabilityTasks[Math.floor(Math.random() * stabilityTasks.length)];
-            await mdxProvider.executeTask(task);
-            await new Promise(resolve => setTimeout(resolve, 200 + Math.random() * 300));
-            await mdxProvider.stopTask(task);
-          }
-          
-          // Cleanup wait
-          let attempts = 0;
-          while (mdxProvider._runningTasks.size > 0 && attempts < 30) {
-            await new Promise(resolve => setTimeout(resolve, 50));
-            attempts++;
-          }
-        }
+  // -----------------------------------------------------------------------
+  //  sendTasksToWebview
+  // -----------------------------------------------------------------------
+  suite('sendTasksToWebview', () => {
+    test('posts updateTasks with task list', async () => {
+      vscode.tasks._registerTask(new vscode.MockTask('build'));
+      vscode.tasks._registerTask(new vscode.MockTask('test'));
+
+      await provider.sendTasksToWebview();
+
+      const msg = view.webview._messages.find(m => m.type === 'updateTasks');
+      assert.ok(msg);
+      assert.strictEqual(msg.tasks.length, 2);
+      assert.ok(msg.tasks.find(t => t.label === 'build'));
+    });
+
+    test('handles empty task list', async () => {
+      await provider.sendTasksToWebview();
+      const msg = view.webview._messages.find(m => m.type === 'updateTasks');
+      assert.ok(msg);
+      assert.strictEqual(msg.tasks.length, 0);
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  //  getTaskDependencies
+  // -----------------------------------------------------------------------
+  suite('getTaskDependencies', () => {
+    test('returns empty array when no dependencies', async () => {
+      const task = new vscode.MockTask('build', 'Workspace', {});
+      const deps = await provider.getTaskDependencies(task);
+      assert.deepStrictEqual(deps, []);
+    });
+
+    test('returns dependencies from task.definition.dependsOn', async () => {
+      const task = new vscode.MockTask('test', 'Workspace', { dependsOn: ['build', 'lint'] });
+      const deps = await provider.getTaskDependencies(task);
+      assert.deepStrictEqual(deps, ['build', 'lint']);
+    });
+
+    test('wraps single dependsOn string in array', async () => {
+      const task = new vscode.MockTask('test', 'Workspace', { dependsOn: 'build' });
+      const deps = await provider.getTaskDependencies(task);
+      assert.deepStrictEqual(deps, ['build']);
+    });
+
+    test('reads dependencies from tasks.json if not on definition', async () => {
+      const tasksJsonPath = path.join('/workspaces/ControlPanel', '.vscode', 'tasks.json');
+      stubFs(sandbox, { [tasksJsonPath]: TASKS_JSON_CONTENT });
+
+      const task = new vscode.MockTask('test', 'Workspace', {});
+      // task.scope not set, so it'll use workspace.workspaceFolders
+      const deps = await provider.getTaskDependencies(task);
+      assert.deepStrictEqual(deps, ['build']);
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  //  resolveWebviewView
+  // -----------------------------------------------------------------------
+  suite('resolveWebviewView', () => {
+    test('sets webview HTML and options', () => {
+      const webviewView = new vscode.MockWebviewView();
+      stubFs(sandbox, {}); // no webview.html file
+
+      provider.resolveWebviewView(webviewView, {}, {});
+
+      assert.ok(webviewView.webview.html.includes('<!DOCTYPE html'));
+      assert.strictEqual(webviewView.webview.options.enableScripts, true);
+    });
+
+    test('sets _view on the provider', () => {
+      const webviewView = new vscode.MockWebviewView();
+      stubFs(sandbox, {});
+
+      provider.resolveWebviewView(webviewView, {}, {});
+      assert.strictEqual(provider._view, webviewView);
+    });
+
+    test('handles "ready" message from webview', async () => {
+      const webviewView = new vscode.MockWebviewView();
+      stubFs(sandbox, {});
+
+      provider.resolveWebviewView(webviewView, {}, {});
+
+      // Simulate webview sending 'ready'
+      webviewView.webview._simulateMessage({ type: 'ready' });
+
+      // Give async handlers a tick
+      await new Promise(r => setTimeout(r, 20));
+
+      // sendTasksToWebview should have been called (posting updateTasks)
+      const msg = webviewView.webview._messages.find(m => m.type === 'updateTasks');
+      assert.ok(msg);
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  //  openTaskDefinition
+  // -----------------------------------------------------------------------
+  suite('openTaskDefinition', () => {
+    test('opens tasks.json and navigates to label line', async () => {
+      const tasksJsonPath = path.join('/workspaces/ControlPanel', '.vscode', 'tasks.json');
+      stubFs(sandbox, { [tasksJsonPath]: TASKS_JSON_CONTENT });
+
+      const openSpy = sandbox.spy(vscode.workspace, 'openTextDocument');
+      await provider.openTaskDefinition('build');
+
+      assert.ok(openSpy.calledOnce);
+      assert.ok(openSpy.firstCall.args[0].includes('tasks.json'));
+    });
+
+    test('shows info message when tasks.json not found', async () => {
+      stubFs(sandbox, {}); // no files
+      const spy = sandbox.spy(vscode.window, 'showInformationMessage');
+      await provider.openTaskDefinition('build');
+      assert.ok(spy.calledOnce);
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  //  Bulk start/end stress
+  // -----------------------------------------------------------------------
+  suite('System Stability Under Load', () => {
+    test('100 rapid task start/end cycles', () => {
+      for (let i = 0; i < 100; i++) {
+        const label = `task-${i}`;
+        provider.handleTaskStarted(createStartEvent(label));
+        provider.handleTaskEnded(createEndEvent(label, i % 5 === 0 ? 1 : 0));
       }
-      
-      // Final stability check
-      assert.strictEqual(mdxProvider._runningTasks.size, 0, 'No tasks should be running');
-      
-      // Check provider is still responsive
-      await mdxProvider.executeTask('test:stability-check');
-      await mdxProvider.stopTask('test:stability-check');
-      
-      console.log('Extension stability simulation completed successfully');
+      assert.strictEqual(provider._runningTasks.size, 0);
+      assert.strictEqual(provider._taskStartTimes.size, 0);
+    });
+
+    test('webview receives messages for all task events', () => {
+      for (let i = 0; i < 10; i++) {
+        provider.handleTaskStarted(createStartEvent(`t-${i}`));
+        provider.handleTaskEnded(createEndEvent(`t-${i}`, 0));
+      }
+      const endedMsgs = view.webview._messages.filter(m => m.type === 'taskEnded');
+      assert.strictEqual(endedMsgs.length, 10);
     });
   });
 });

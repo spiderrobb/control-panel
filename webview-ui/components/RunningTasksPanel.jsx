@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import Button from '@mui/material/Button';
 import IconButton from '@mui/material/IconButton';
 import Tooltip from '@mui/material/Tooltip';
@@ -6,8 +6,10 @@ import LinearProgress from '@mui/material/LinearProgress';
 import StopIcon from '@mui/icons-material/Stop';
 import BoltIcon from '@mui/icons-material/Bolt';
 import CloseIcon from '@mui/icons-material/Close';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 
-function RunningTasksPanel({ runningTasks, onStop, onFocus, onOpenDefinition, onDismiss, onShowLogs, onRequestLogBuffer, logBuffer }) {
+function RunningTasksPanel({ runningTasks, onStop, onFocus, onOpenDefinition, onDismiss, onShowLogs, onRequestLogBuffer, logBuffer, isCollapsed, onToggleCollapsed }) {
   const [showDebug, setShowDebug] = useState(false);
   const runningTasksList = Object.entries(runningTasks).filter(([_, state]) => state.running || state.failed);
 
@@ -19,6 +21,12 @@ function RunningTasksPanel({ runningTasks, onStop, onFocus, onOpenDefinition, on
       return () => clearInterval(interval);
     }
   }, [showDebug]);
+
+  useEffect(() => {
+    if (isCollapsed && showDebug) {
+      setShowDebug(false);
+    }
+  }, [isCollapsed, showDebug]);
 
   if (runningTasksList.length === 0) {
     return null;
@@ -42,6 +50,15 @@ function RunningTasksPanel({ runningTasks, onStop, onFocus, onOpenDefinition, on
       <div className="panel-header">
         <h3>Running Tasks ({runningTasksList.length})</h3>
         <div style={{ display: 'flex', gap: '4px', marginLeft: 'auto' }}>
+          <Tooltip title={isCollapsed ? 'Expand' : 'Collapse'}>
+            <IconButton
+              size="small"
+              onClick={onToggleCollapsed}
+              sx={{ p: 0.5 }}
+            >
+              {isCollapsed ? <ExpandMoreIcon sx={{ fontSize: 18 }} /> : <ExpandLessIcon sx={{ fontSize: 18 }} />}
+            </IconButton>
+          </Tooltip>
           <Button
             variant="outlined"
             size="small"
@@ -55,12 +72,13 @@ function RunningTasksPanel({ runningTasks, onStop, onFocus, onOpenDefinition, on
             size="small"
             onClick={() => setShowDebug(!showDebug)}
             sx={{ minWidth: 'auto' }}
+            disabled={isCollapsed}
           >
             {showDebug ? 'Hide Debug' : 'Debug Info'}
           </Button>
         </div>
       </div>
-      {showDebug && (
+      {!isCollapsed && showDebug && (
         <div style={{ padding: '10px', background: 'var(--vscode-editor-background)', borderBottom: '1px solid var(--vscode-panel-border)' }}>
             <p style={{ margin: '0 0 5px 0', fontSize: '11px', opacity: 0.8 }}>Task State (copy this JSON to share):</p>
             <textarea 
@@ -113,21 +131,23 @@ function RunningTasksPanel({ runningTasks, onStop, onFocus, onOpenDefinition, on
             </div>
         </div>
       )}
-      <div className="panel-content">
-        {rootTasks.map(([label, state]) => (
-          <RunningTaskItem
-            key={label}
-            label={label}
-            state={state}
-            onStop={onStop}
-            onFocus={onFocus}
-            onOpenDefinition={onOpenDefinition}
-            onDismiss={onDismiss}
-            allRunningTasks={runningTasks}
-            depth={0}
-          />
-        ))}
-      </div>
+      {!isCollapsed && (
+        <div className="panel-content">
+          {rootTasks.map(([label, state]) => (
+            <RunningTaskItem
+              key={label}
+              label={label}
+              state={state}
+              onStop={onStop}
+              onFocus={onFocus}
+              onOpenDefinition={onOpenDefinition}
+              onDismiss={onDismiss}
+              allRunningTasks={runningTasks}
+              depth={0}
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
 }

@@ -1,392 +1,214 @@
+/**
+ * Resource Management Tests
+ *
+ * Tests cleanup of internal state maps, size limits on persisted data,
+ * subscription disposal, and Logger resource management.
+ */
+
 const assert = require('assert');
-const vscode = require('./vscode-mock');
+const sinon = require('sinon');
+const {
+  createProvider,
+  createLogger,
+  createMockContext,
+  createStartEvent,
+  createEndEvent,
+  vscode,
+} = require('./helpers/provider-factory');
 
 suite('Resource Management Tests', () => {
-  let mdxProvider;
-  let context;
+  let provider, logger;
+  let sandbox;
 
-  suiteSetup(async () => {
-    const ext = vscode.extensions.getExtension('controlpanel');
-    if (ext && !ext.isActive) {
-      await ext.activate();
-    }
-    mdxProvider = null; // Will be mocked for testing
-    
-    context = {
-      subscriptions: [],
-      workspaceState: new Map(),
-      globalState: {
-        get: (key) => context.workspaceState.get(key),
-        update: (key, value) => context.workspaceState.set(key, value)
-      },
-      extensionPath: __dirname
-    };
+  setup(() => {
+    sandbox = sinon.createSandbox();
+    ({ provider, logger } = createProvider());
   });
 
-  suiteTeardown(async () => {
-    if (mdxProvider) {
-      await mdxProvider.stopAllTasks();
-    }
+  teardown(() => {
+    sandbox.restore();
+    vscode.tasks._clearTasks();
   });
 
-  suite('Memory Leak Detection', () => {
-    test('State map cleanup on task completion', async function() {
-      this.timeout(15000);
-      
-      if (!mdxProvider) {
-        this.skip();
-        return;
-      }
-
-      // Capture initial state sizes
-      const initialRunning = mdxProvider._runningTasks.size;
-      
-      const tasks = ['test:cleanup-1', 'test:cleanup-2', 'build:cleanup', 'lint:cleanup'];
-      
-      // Run tasks to completion
-      for (const task of tasks) {
-        await mdxProvider.executeTask(task);
-      }
-      
-      // Wait for all tasks to complete
-      let attempts = 0;
-      while (mdxProvider._runningTasks.size > initialRunning && attempts < 200) {
-        await new Promise(resolve => setTimeout(resolve, 100));
-        attempts++;
-      }
-      
-      // Check state cleanup for completed tasks
-      const completedTasks = tasks.filter(task => 
-        !mdxProvider._runningTasks.has(task) && 
-        mdxProvider._taskStates.get(task) !== 'running'
-      );
-      
-      // Start times should be cleaned up for completed tasks
-      completedTasks.forEach(task => {
-        if (mdxProvider._taskStates.get(task) === 'stopped' || 
-            mdxProvider._taskStates.get(task) === 'failed') {
-          assert.strictEqual(mdxProvider._taskStartTimes.has(task), false,
-            `Start time for ${task} should be cleaned up`);
-        }
-      });
-      
-      // Running tasks map should only contain actually running tasks
-      const runningTasksArray = Array.from(mdxProvider._runningTasks.keys());
-      runningTasksArray.forEach(task => {
-        const state = mdxProvider._taskStates.get(task);
-        assert.ok(['starting', 'running'].includes(state),
-          `Running task ${task} should have appropriate state, got: ${state}`);
-      });
+  // -----------------------------------------------------------------------
+  //  State Map Cleanup
+  // -----------------------------------------------------------------------
+  suite('State Map Cleanup on Task Completion', () => {
+    test('runningTasks is cleared after task ends', () => {
+      provider.handleTaskStarted(createStartEvent('build'));
+      assert.ok(provider._runningTasks.has('build'));
+      provider.handleTaskEnded(createEndEvent('build', 0));
+      assert.strictEqual(provider._runningTasks.has('build'), false);
     });
 
-    test('Memory usage stability over time', async function() {
-      this.timeout(30000);
-      
-      if (!mdxProvider) {
-        this.skip();
-        return;
-      }
-
-      const getMemoryUsage = () => process.memoryUsage();
-      const initialMemory = getMemoryUsage();
-      
-      // Simulate extended usage
-      const cycles = 15;
-      for (let i = 0; i < cycles; i++) {
-        // Start several tasks
-        const tasks = [`test:memory-cycle-${i}-1`, `test:memory-cycle-${i}-2`];
-        await Promise.all(tasks.map(task => mdxProvider.executeTask(task)));
-        
-        // Let them run
-        await new Promise(resolve => setTimeout(resolve, 300));
-        
-        // Stop them
-        await Promise.all(tasks.map(task => mdxProvider.stopTask(task)));
-        
-        // Wait for cleanup
-        let attempts = 0;
-        while (tasks.some(task => mdxProvider._runningTasks.has(task)) && attempts < 50) {
-          await new Promise(resolve => setTimeout(resolve, 100));
-          attempts++;
-        }
-        
-        // Trigger GC if available
-        if (global.gc && i % 5 === 0) {
-          global.gc();
-        }
-      }
-      
-      const finalMemory = getMemoryUsage();
-      const heapIncrease = finalMemory.heapUsed - initialMemory.heapUsed;
-      const rsIncrease = finalMemory.rss - initialMemory.rss;
-      
-      console.log(`Heap increase: ${Math.round(heapIncrease / 1024 / 1024)}MB`);
-      console.log(`RSS increase: ${Math.round(rsIncrease / 1024 / 1024)}MB`);
-      
-      // Memory increase should be reasonable for the number of operations
-      assert.ok(heapIncrease < 30 * 1024 * 1024, 'Heap memory increase should be < 30MB');
-      assert.ok(rsIncrease < 50 * 1024 * 1024, 'RSS increase should be < 50MB');
+    test('taskStartTimes is cleared after task ends', () => {
+      provider.handleTaskStarted(createStartEvent('build'));
+      assert.ok(provider._taskStartTimes.has('build'));
+      provider.handleTaskEnded(createEndEvent('build', 0));
+      assert.strictEqual(provider._taskStartTimes.has('build'), false);
     });
 
-    test('Event listener cleanup', async function() {
-      this.timeout(10000);
-      
-      if (!mdxProvider) {
-        this.skip();
-        return;
-      }
+    test('taskHierarchy is cleared after parent task ends', () => {
+      provider.handleTaskStarted(createStartEvent('parent'));
+      provider.addSubtask('parent', 'child');
+      provider.handleTaskEnded(createEndEvent('parent', 0));
+      assert.strictEqual(provider._taskHierarchy.has('parent'), false);
+    });
 
-      // Count initial event listeners (if accessible)
-      const initialListenerCount = process.listenerCount ? 
-        process.listenerCount('exit') : 0;
-      
-      // Perform operations that might create listeners
-      const tasks = ['test:listeners-1', 'test:listeners-2'];
-      for (const task of tasks) {
-        await mdxProvider.executeTask(task);
-        await mdxProvider.stopTask(task);
+    test('multiple task start/end cycles leave no orphan state', () => {
+      for (let i = 0; i < 10; i++) {
+        const label = `task-${i}`;
+        provider.handleTaskStarted(createStartEvent(label));
+        provider.handleTaskEnded(createEndEvent(label, 0));
       }
-      
-      // Wait for cleanup
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
-      // Check that listeners haven't accumulated excessively
-      const finalListenerCount = process.listenerCount ? 
-        process.listenerCount('exit') : 0;
-      const listenerIncrease = finalListenerCount - initialListenerCount;
-      
-      assert.ok(listenerIncrease <= 2, 
-        `Excessive event listener accumulation: ${listenerIncrease}`);
+      assert.strictEqual(provider._runningTasks.size, 0);
+      assert.strictEqual(provider._taskStartTimes.size, 0);
+    });
+
+    test('_taskStates entries are cleaned up after completion', () => {
+      provider.handleTaskStarted(createStartEvent('build'));
+      assert.strictEqual(provider._taskStates.get('build'), 'running');
+      provider.handleTaskEnded(createEndEvent('build', 0));
+      assert.strictEqual(provider._taskStates.has('build'), false);
+    });
+
+    test('_stoppingTasks is empty when no tasks are being stopped', () => {
+      assert.strictEqual(provider._stoppingTasks.size, 0);
+    });
+
+    test('_stoppingTasks is cleaned after stopTask completes', async () => {
+      const task = new vscode.MockTask('build');
+      const execution = new vscode.MockTaskExecution(task);
+      provider._runningTasks.set('build', execution);
+      provider._taskStates.set('build', 'running');
+
+      await provider.stopTask('build');
+      assert.strictEqual(provider._stoppingTasks.size, 0);
     });
   });
 
-  suite('Terminal Resource Management', () => {
-    test('Terminal cleanup verification', async function() {
-      this.timeout(15000);
-      
-      if (!mdxProvider) {
-        this.skip();
-        return;
+  // -----------------------------------------------------------------------
+  //  Size Limits on Persisted Data
+  // -----------------------------------------------------------------------
+  suite('Persisted Data Size Limits', () => {
+    test('recentlyUsedTasks capped at 5', async () => {
+      for (let i = 0; i < 10; i++) {
+        await provider.addRecentlyUsedTask(`t-${i}`);
       }
-
-      const initialTerminalCount = vscode.window.terminals.length;
-      const tasks = ['test:terminal-1', 'test:terminal-2', 'build:terminal'];
-      
-      // Start tasks that create terminals
-      for (const task of tasks) {
-        await mdxProvider.executeTask(task);
-      }
-      
-      // Let them run briefly
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
-      // Stop all tasks
-      for (const task of tasks) {
-        await mdxProvider.stopTask(task);
-      }
-      
-      // Wait for cleanup
-      let attempts = 0;
-      while (tasks.some(task => mdxProvider._runningTasks.has(task)) && attempts < 100) {
-        await new Promise(resolve => setTimeout(resolve, 100));
-        attempts++;
-      }
-      
-      // Check terminal count hasn't grown excessively
-      const finalTerminalCount = vscode.window.terminals.length;
-      const terminalIncrease = finalTerminalCount - initialTerminalCount;
-      
-      console.log(`Terminal count increase: ${terminalIncrease}`);
-      
-      // Some terminals may remain for debugging, but shouldn't be excessive
-      assert.ok(terminalIncrease <= tasks.length + 2, 
-        'Terminal count should not grow excessively');
+      const recent = await provider.getRecentlyUsedTasks();
+      assert.strictEqual(recent.length, 5);
     });
 
-    test('Terminal disposal on task failure', async function() {
-      this.timeout(10000);
-      
-      if (!mdxProvider) {
-        this.skip();
-        return;
+    test('starredTasks capped at 20', async () => {
+      for (let i = 0; i < 25; i++) {
+        await provider.toggleStarTask(`t-${i}`);
       }
+      const starred = await provider.getStarredTasks();
+      assert.strictEqual(starred.length, 20);
+    });
 
-      const initialTerminalCount = vscode.window.terminals.length;
-      const failingTask = 'fail:terminal-test';
-      
-      // Start a task that will fail
-      await mdxProvider.executeTask(failingTask);
-      
-      // Wait for failure
-      let attempts = 0;
-      while (!mdxProvider._taskFailures.has(failingTask) && 
-             mdxProvider._taskStates.get(failingTask) !== 'failed' && 
-             attempts < 100) {
-        await new Promise(resolve => setTimeout(resolve, 100));
-        attempts++;
+    test('executionHistory capped at 20', async () => {
+      for (let i = 0; i < 30; i++) {
+        await provider.addExecutionRecord({ id: `${i}`, taskLabel: `t-${i}` });
       }
-      
-      // Task should be failed and not running
-      assert.ok(mdxProvider._taskStates.get(failingTask) === 'failed' ||
-               mdxProvider._taskFailures.has(failingTask));
-      assert.strictEqual(mdxProvider._runningTasks.has(failingTask), false);
-      
-      // Terminal resources should be cleaned up appropriately
-      const finalTerminalCount = vscode.window.terminals.length;
-      console.log(`Terminals after failure: ${finalTerminalCount - initialTerminalCount}`);
+      const h = await provider.getExecutionHistory();
+      assert.strictEqual(h.length, 20);
+    });
+
+    test('taskHistory durations capped at 10 per task', async () => {
+      for (let i = 0; i < 15; i++) {
+        await provider.updateTaskHistory('build', i * 100);
+      }
+      const h = await provider.getTaskHistory('build');
+      assert.strictEqual(h.durations.length, 10);
     });
   });
 
-  suite('State Persistence Across Extension Reloads', () => {
-    test('Task history persistence', async function() {
-      this.timeout(10000);
-      
-      if (!mdxProvider) {
-        this.skip();
-        return;
-      }
-
-      // Clear existing history
-      await context.globalState.update('taskHistory', []);
-      
-      const testTasks = ['test:history-1', 'build:history-2'];
-      
-      // Execute tasks to build history
-      for (const task of testTasks) {
-        await mdxProvider.executeTask(task);
-        await new Promise(resolve => setTimeout(resolve, 500));
-        await mdxProvider.stopTask(task);
-      }
-      
-      // Wait for history update
-      await new Promise(resolve => setTimeout(resolve, 500));
-      
-      // Check that history was persisted
-      const history = context.globalState.get('taskHistory') || [];
-      
-      testTasks.forEach(task => {
-        const historyEntry = history.find(h => h.label === task);
-        assert.ok(historyEntry, `Task ${task} should be in history`);
-        assert.ok(historyEntry.lastRun, 'History entry should have lastRun timestamp');
+  // -----------------------------------------------------------------------
+  //  Subscription / Disposable Tracking
+  // -----------------------------------------------------------------------
+  suite('Subscription Management', () => {
+    test('constructor pushes task event subscriptions to context.subscriptions', () => {
+      const ctx = createMockContext();
+      const lg = createLogger();
+      const _p = require('../src/providers/MdxWebviewProvider');
+      void new _p(ctx, lg);
+      // Two subscriptions: onDidStartTaskProcess + onDidEndTaskProcess
+      assert.ok(ctx.subscriptions.length >= 2);
+      // Each should have a dispose method
+      ctx.subscriptions.forEach(sub => {
+        assert.strictEqual(typeof sub.dispose, 'function');
       });
     });
+  });
 
-    test('Task failure state persistence', async function() {
-      this.timeout(10000);
-      
-      if (!mdxProvider) {
-        this.skip();
-        return;
+  // -----------------------------------------------------------------------
+  //  Logger Resource Management
+  // -----------------------------------------------------------------------
+  suite('Logger Resources', () => {
+    test('Logger ring buffer caps at configured size', () => {
+      const lg = createLogger('Test', 5);
+      for (let i = 0; i < 10; i++) {
+        lg.info(`msg-${i}`);
       }
-
-      const failingTask = 'fail:persistence-test';
-      
-      // Start a failing task
-      await mdxProvider.executeTask(failingTask);
-      
-      // Wait for failure
-      let attempts = 0;
-      while (!mdxProvider._taskFailures.has(failingTask) && attempts < 100) {
-        await new Promise(resolve => setTimeout(resolve, 100));
-        attempts++;
-      }
-      
-      // Verify failure is recorded
-      assert.ok(mdxProvider._taskFailures.has(failingTask));
-      const failure = mdxProvider._taskFailures.get(failingTask);
-      assert.ok(failure.timestamp);
-      assert.ok(typeof failure.exitCode === 'number');
-      
-      // Simulate extension reload by checking persistence mechanism
-      if (typeof mdxProvider._saveFailureState === 'function') {
-        await mdxProvider._saveFailureState();
-      }
+      assert.strictEqual(lg.getBuffer().length, 5);
+      lg.dispose();
     });
 
-    test('Starred task persistence', async function() {
-      this.timeout(5000);
-      
-      if (!mdxProvider) {
-        this.skip();
-        return;
-      }
+    test('Logger.dispose() disposes the output channel', () => {
+      const lg = createLogger();
+      lg.dispose();
+      assert.strictEqual(lg._channel._disposed, true);
+    });
 
-      const taskToStar = 'test:starred-persistence';
-      
-      // Star a task (if the functionality exists)
-      if (typeof mdxProvider.toggleTaskStar === 'function') {
-        await mdxProvider.toggleTaskStar(taskToStar);
-        
-        // Check that starred state is persisted
-        const starredTasks = context.globalState.get('starredTasks') || [];
-        assert.ok(starredTasks.includes(taskToStar), 'Task should be starred');
-        
-        // Unstar it
-        await mdxProvider.toggleTaskStar(taskToStar);
-        const updatedStarred = context.globalState.get('starredTasks') || [];
-        assert.ok(!updatedStarred.includes(taskToStar), 'Task should be unstarred');
-      }
+    test('getBuffer returns a copy, not a reference', () => {
+      logger.info('one');
+      const buf1 = logger.getBuffer();
+      buf1.push({ fake: true });
+      assert.strictEqual(logger.getBuffer().length, 1);
     });
   });
 
-  suite('Resource Cleanup on Extension Deactivation', () => {
-    test('Cleanup preparation for deactivation', async function() {
-      this.timeout(10000);
-      
-      if (!mdxProvider) {
-        this.skip();
-        return;
-      }
+  // -----------------------------------------------------------------------
+  //  Terminal Resource Tracking
+  // -----------------------------------------------------------------------
+  suite('Terminal Management', () => {
+    test('focusTaskTerminal finds terminal by name', async () => {
+      // Add a terminal that matches the task name
+      const terminal = new vscode.MockTerminal('Task - build');
+      vscode.window.terminals.push(terminal);
 
-      // Start some tasks
-      const tasks = ['test:deactivation-1', 'test:deactivation-2'];
-      for (const task of tasks) {
-        await mdxProvider.executeTask(task);
-      }
-      
-      // Simulate preparation for deactivation
-      if (typeof mdxProvider.prepareForDeactivation === 'function') {
-        await mdxProvider.prepareForDeactivation();
-      } else {
-        // Manual cleanup
-        await mdxProvider.stopAllTasks();
-      }
-      
-      // Verify all tasks are stopped
-      let attempts = 0;
-      while (mdxProvider._runningTasks.size > 0 && attempts < 100) {
-        await new Promise(resolve => setTimeout(resolve, 100));
-        attempts++;
-      }
-      
-      assert.strictEqual(mdxProvider._runningTasks.size, 0, 
-        'All tasks should be stopped before deactivation');
+      const showSpy = sandbox.spy(terminal, 'show');
+      await provider.focusTaskTerminal('build');
+
+      assert.ok(showSpy.calledOnce);
+      vscode.window._clearTerminals();
     });
 
-    test('Context subscription cleanup', async function() {
-      this.timeout(5000);
-      
-      if (!mdxProvider) {
-        this.skip();
-        return;
-      }
+    test('focusTaskTerminal shows warning when terminal not found', async () => {
+      vscode.window._clearTerminals();
+      const spy = sandbox.spy(vscode.window, 'showWarningMessage');
+      await provider.focusTaskTerminal('nonexistent');
+      assert.ok(spy.calledOnce);
+    });
 
-      const initialSubscriptions = context.subscriptions.length;
-      
-      // Simulate some operations that might add subscriptions
-      await mdxProvider.executeTask('test:subscriptions');
-      await mdxProvider.stopTask('test:subscriptions');
-      
-      // Check if cleanup method exists and call it
-      if (typeof mdxProvider.dispose === 'function') {
-        await mdxProvider.dispose();
-        
-        // Verify subscriptions are cleaned up
-        // Note: In real VS Code, subscriptions would be disposed automatically
-        // This test mainly ensures the dispose method exists and works
-      }
-      
-      console.log(`Subscriptions: ${initialSubscriptions} -> ${context.subscriptions.length}`);
+    test('stopTask disposes matching terminal in fallback methods', async () => {
+      const taskObj = new vscode.MockTask('build');
+      const execution = new vscode.MockTaskExecution(taskObj);
+      // Make terminate throw so it falls through to Method 2
+      execution.terminate = () => { throw new Error('cannot terminate'); };
+
+      provider._runningTasks.set('build', execution);
+      provider._taskStates.set('build', 'running');
+
+      // Add a matching terminal
+      const terminal = new vscode.MockTerminal('Task - build');
+      vscode.window.terminals.push(terminal);
+
+      await provider.stopTask('build');
+
+      assert.strictEqual(terminal._disposed, true);
+      vscode.window._clearTerminals();
     });
   });
 });
