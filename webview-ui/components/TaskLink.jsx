@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useContext } from 'react';
+import React, { useState, useEffect } from 'react';
 import IconButton from '@mui/material/IconButton';
 import Tooltip from '@mui/material/Tooltip';
 import Popover from '@mui/material/Popover';
@@ -33,7 +33,7 @@ const normalizePath = (path) => {
   return path.trim().toLowerCase().replace(/^\.\//, '');
 };
 
-function TaskLink({ label, taskId, displayLabel, onRun, onStop, onFocus, onOpenDefinition, taskState, allRunningTasks, dependencySegments = [], dependsOrder, tasks = [], starredTasks, onToggleStar, npmPathColorMap, setNpmPathColorMap }) {
+function TaskLink({ label, taskId, displayLabel, onRun, onStop, onFocus, onOpenDefinition, taskState, allRunningTasks, dependencySegments = [], dependsOrder, tasks = [], starredTasks, onToggleStar, npmPathColorMap, setNpmPathColorMap, disabled = false }) {
   const [runtime, setRuntime] = useState(0);
   const [progress, setProgress] = useState(0);
   const [segmentTick, setSegmentTick] = useState(0);
@@ -43,8 +43,14 @@ function TaskLink({ label, taskId, displayLabel, onRun, onStop, onFocus, onOpenD
   // Get current task info - prefer ID if available
   const currentTask = taskId 
     ? tasks.find(t => t.id === taskId) 
-    : tasks.find(t => t.label === label);
+    : (() => {
+        const matching = tasks.filter(t => t.label === label);
+        return matching.find(t => t.source === 'Workspace') || matching[0];
+      })();
     
+  // Detect if task definition is missing
+  const taskNotFound = !currentTask;
+  
   const isNpmTask = currentTask?.source === 'npm';
   const npmPath = currentTask?.definition?.path;
   const scriptName = currentTask?.definition?.script;
@@ -165,18 +171,6 @@ function TaskLink({ label, taskId, displayLabel, onRun, onStop, onFocus, onOpenD
     return 'idle';
   };
 
-  const getSegmentStateWithParent = (taskLabel) => {
-    const segmentState = getSegmentState(taskLabel);
-    if (segmentState === 'error' || segmentState === 'running') {
-      return segmentState;
-    }
-    // If parent is in error state but this segment is not, mark as success
-    if (parentDependencyState === 'error' && segmentState === 'idle') {
-      return 'success';
-    }
-    return segmentState;
-  };
-
   const getParentDependencyState = () => {
     if (!hasDependencies) {
       if (isFailed) return 'error';
@@ -193,6 +187,18 @@ function TaskLink({ label, taskId, displayLabel, onRun, onStop, onFocus, onOpenD
   };
 
   const parentDependencyState = getParentDependencyState();
+
+  const getSegmentStateWithParent = (taskLabel) => {
+    const segmentState = getSegmentState(taskLabel);
+    if (segmentState === 'error' || segmentState === 'running') {
+      return segmentState;
+    }
+    // If parent is in error state but this segment is not, mark as success
+    if (parentDependencyState === 'error' && segmentState === 'idle') {
+      return 'success';
+    }
+    return segmentState;
+  };
 
   const getParentBackgroundClass = () => {
     if (parentDependencyState === 'error') return 'error';
@@ -221,22 +227,45 @@ function TaskLink({ label, taskId, displayLabel, onRun, onStop, onFocus, onOpenD
   };
 
   const getTaskInfo = (taskLabel) => {
-    const taskData = tasks?.find(t => t.id === taskLabel || t.label === taskLabel);
+    let taskData = tasks?.find(t => t.id === taskLabel);
+    if (!taskData) {
+      const matching = tasks?.filter(t => t.label === taskLabel) || [];
+      taskData = matching.find(t => t.source === 'Workspace') || matching[0];
+    }
     
     // Helper to determine source file
-    const getSourceFile = (task) => {
-      if (task?.source === 'npm' && task?.definition?.path) {
-        return `${task.definition.path}/package.json`;
+    const getSourceFile = (task, idOrLabel) => {
+      // If we have the task object and it is npm
+      if (task?.source === 'npm') {
+        if (task?.definition?.path) {
+          return `${task.definition.path}/package.json`;
+        }
+        return 'package.json';
       }
+
+      // Fallback: If ID looks like an npm task, assume root package.json
+      // We avoid parsing strings (e.g. split(':')) to prevent misidentification of root scripts
+      if (typeof idOrLabel === 'string' && idOrLabel.startsWith('npm|')) {
+        return 'package.json';
+      }
+
       return 'tasks.json';
+    };
+    
+    // Helper to format command string with task type
+    const formatCommandString = (task) => {
+      if (!task) return 'No command defined';
+      const taskType = task.source || 'unknown';
+      const command = task.definition?.command || task.definition?.script || '';
+      return command ? `${taskType}: ${command}` : `${taskType}: `;
     };
     
     if (taskLabel === label || taskLabel === taskId) {
       return {
         name: label,
         source: taskData?.source,
-        sourceFile: getSourceFile(taskData),
-        script: taskData?.detail || 'No script defined',
+        sourceFile: getSourceFile(taskData, taskLabel),
+        script: formatCommandString(taskData),
         status: isFailed ? 'failed' : (isRunning ? 'running' : 'idle'),
         duration: runtime,
         progress: progress,
@@ -249,8 +278,8 @@ function TaskLink({ label, taskId, displayLabel, onRun, onStop, onFocus, onOpenD
     return {
       name: segmentTaskData?.label || taskLabel,
       source: segmentTaskData?.source || 'unknown',
-      sourceFile: getSourceFile(segmentTaskData),
-      script: segmentTaskData?.detail || 'No script defined',
+      sourceFile: getSourceFile(segmentTaskData, taskLabel),
+      script: formatCommandString(segmentTaskData),
       status: segmentState?.failed ? 'failed' : (segmentState?.running ? 'running' : 'idle'),
       duration: segmentState?.startTime ? Date.now() - segmentState.startTime : 0,
       exitCode: segmentState?.exitCode,
@@ -297,7 +326,7 @@ function TaskLink({ label, taskId, displayLabel, onRun, onStop, onFocus, onOpenD
       <span
         key={segmentLabel}
         className={`task-segment segment-${state} ${isParent ? 'segment-parent' : 'segment-child'} ${progressInfo.indeterminate ? 'segment-indeterminate' : ''}`}
-        onDoubleClick={() => onOpenDefinition(segmentLabel)}
+        onDoubleClick={disabled || taskNotFound ? undefined : () => onOpenDefinition(segmentLabel)}
         onMouseEnter={(e) => handleSegmentHover(e, segmentLabel)}
         onMouseLeave={handleSegmentLeave}
         style={{
@@ -356,8 +385,8 @@ function TaskLink({ label, taskId, displayLabel, onRun, onStop, onFocus, onOpenD
       return (
         <span
           className="task-label"
-          onDoubleClick={() => onOpenDefinition(taskId || label)}
-          title="Double-click to open task definition in tasks.json"
+          onDoubleClick={disabled || taskNotFound ? undefined : () => onOpenDefinition(taskId || label)}
+          title={disabled || taskNotFound ? undefined : "Double-click to open task definition in tasks.json"}
         >
           {isNpmTask && (
             <Chip
@@ -388,10 +417,22 @@ function TaskLink({ label, taskId, displayLabel, onRun, onStop, onFocus, onOpenD
     return renderSequentialSegments();
   };
 
+  const tooltipTitle = taskNotFound ? 'Task not found' : '';
+  const containerSx = taskNotFound 
+    ? { opacity: 0.8 }
+    : disabled 
+    ? { 
+        backgroundColor: 'var(--vscode-input-background)',
+        color: 'var(--vscode-descriptionForeground)',
+        opacity: 0.6,
+        cursor: 'not-allowed'
+      }
+    : {};
+
   if (isRunning || isFailed) {
     const hasSubtasks = subtasks.length > 0 && !hasDependencies;
     
-    return (
+    const content = (
       <>
         <div className={`task-link running ${hasSubtasks ? 'with-subtasks' : ''}`}>
           <div 
@@ -400,17 +441,20 @@ function TaskLink({ label, taskId, displayLabel, onRun, onStop, onFocus, onOpenD
             onMouseEnter={(e) => handleSegmentHover(e, taskId || label)}
             onMouseLeave={handleSegmentLeave}
           >
-          <Tooltip title={starredTasks?.includes(taskId || label) ? 'Remove from starred tasks' : 'Add to starred tasks'}>
-            <IconButton
-              size="small"
-              onClick={(e) => {
-                e.stopPropagation();
-                onToggleStar?.(taskId || label);
-              }}
-              sx={{ p: 0.5, color: 'inherit' }}
-            >
-              {starredTasks?.includes(taskId || label) ? <StarIcon sx={{ fontSize: 16 }} /> : <StarBorderIcon sx={{ fontSize: 16 }} />}
-            </IconButton>
+          <Tooltip title={disabled || taskNotFound ? '' : (starredTasks?.includes(taskId || label) ? 'Remove from starred tasks' : 'Add to starred tasks')}>
+            <span>
+              <IconButton
+                size="small"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onToggleStar?.(taskId || label);
+                }}
+                disabled={disabled || taskNotFound}
+                sx={{ p: 0.5, color: 'inherit' }}
+              >
+                {starredTasks?.includes(taskId || label) ? <StarIcon sx={{ fontSize: 16 }} /> : <StarBorderIcon sx={{ fontSize: 16 }} />}
+              </IconButton>
+            </span>
           </Tooltip>
           {renderCompositeSegments()}
           {isFailed ? (
@@ -423,37 +467,43 @@ function TaskLink({ label, taskId, displayLabel, onRun, onStop, onFocus, onOpenD
                   ← {getDisplayLabel(failedDependency)}
                 </span>
               )}
-              <Tooltip title="Retry this task">
-                <IconButton
-                  size="small"
-                  onClick={() => onRun(taskId || label)}
-                  sx={{ p: 0.5, ml: 0.5 }}
-                >
-                  <PlayArrowIcon sx={{ fontSize: 16 }} />
-                </IconButton>
+              <Tooltip title={disabled || taskNotFound ? '' : "Retry this task"}>
+                <span>
+                  <IconButton
+                    size="small"
+                    onClick={() => {
+                      handleSegmentLeave(); // Close popover before retrying
+                      onRun(taskId || label);
+                    }}
+                    disabled={disabled || taskNotFound}
+                    sx={{ p: 0.5, ml: 0.5 }}
+                  >
+                    <PlayArrowIcon sx={{ fontSize: 16 }} />
+                  </IconButton>
+                </span>
               </Tooltip>
             </>
           ) : (
             <>
               <span className="runtime" title={`Running for ${formatRuntime(runtime)}`}>{formatRuntime(runtime)}</span>
-              <Tooltip title={canFocus ? "Show terminal output for this task" : "Terminal not available"}>
+              <Tooltip title={disabled || taskNotFound ? '' : (canFocus ? "Show terminal output for this task" : "Terminal not available")}>
                 <span>
                   <IconButton
                     size="small"
                     onClick={() => onFocus(taskId || label)}
-                    disabled={!canFocus}
+                    disabled={!canFocus || disabled || taskNotFound}
                     sx={{ p: 0.5, ml: 0.5 }}
                   >
                     <BoltIcon sx={{ fontSize: 16 }} />
                   </IconButton>
                 </span>
               </Tooltip>
-              <Tooltip title={canStop ? "Stop this task" : "Cannot stop task"}>
+              <Tooltip title={taskNotFound ? '' : (canStop ? "Stop this task" : "Cannot stop task")}>
                 <span>
                   <IconButton
                     size="small"
                     onClick={() => onStop(taskId || label)}
-                    disabled={!canStop}
+                    disabled={!canStop || taskNotFound}
                     sx={{ p: 0.5 }}
                   >
                     <StopIcon sx={{ fontSize: 16 }} />
@@ -483,7 +533,7 @@ function TaskLink({ label, taskId, displayLabel, onRun, onStop, onFocus, onOpenD
           </div>
         )}
       </div>
-      {popoverAnchor && popoverContent && (
+      {!taskNotFound && popoverAnchor && popoverContent && (
         <Popover
           open={Boolean(popoverAnchor)}
           anchorEl={popoverAnchor}
@@ -540,9 +590,21 @@ function TaskLink({ label, taskId, displayLabel, onRun, onStop, onFocus, onOpenD
       )}
     </>
     );
+    
+    return tooltipTitle ? (
+      <Tooltip title={tooltipTitle}>
+        <Box component="span" sx={containerSx}>
+          {content}
+        </Box>
+      </Tooltip>
+    ) : containerSx && Object.keys(containerSx).length > 0 ? (
+      <Box component="span" sx={containerSx}>
+        {content}
+      </Box>
+    ) : content;
   }
 
-  return (
+  const content = (
     <>
       <span className="task-link">
         <span
@@ -550,31 +612,40 @@ function TaskLink({ label, taskId, displayLabel, onRun, onStop, onFocus, onOpenD
           onMouseEnter={(e) => handleSegmentHover(e, taskId || label)}
           onMouseLeave={handleSegmentLeave}
         >
-        <Tooltip title={starredTasks?.includes(taskId || label) ? 'Remove from starred tasks' : 'Add to starred tasks'}>
-          <IconButton
-            size="small"
-            onClick={(e) => {
-              e.stopPropagation();
-              onToggleStar?.(taskId || label);
-            }}
-            sx={{ p: 0.5, color: 'inherit' }}
-          >
-            {starredTasks?.includes(taskId || label) ? <StarIcon sx={{ fontSize: 16 }} /> : <StarBorderIcon sx={{ fontSize: 16 }} />}
-          </IconButton>
+        <Tooltip title={disabled || taskNotFound ? '' : (starredTasks?.includes(taskId || label) ? 'Remove from starred tasks' : 'Add to starred tasks')}>
+          <span>
+            <IconButton
+              size="small"
+              onClick={(e) => {
+                e.stopPropagation();
+                onToggleStar?.(taskId || label);
+              }}
+              disabled={disabled || taskNotFound}
+              sx={{ p: 0.5, color: 'inherit' }}
+            >
+              {starredTasks?.includes(taskId || label) ? <StarIcon sx={{ fontSize: 16 }} /> : <StarBorderIcon sx={{ fontSize: 16 }} />}
+            </IconButton>
+          </span>
         </Tooltip>
         {renderCompositeSegments()}
-        <Tooltip title="Run this task">
-          <IconButton
-            size="small"
-            onClick={() => onRun(taskId || label)}
-            sx={{ p: 0.5, ml: 0.5 }}
-          >
-            <PlayArrowIcon sx={{ fontSize: 16 }} />
-          </IconButton>
+        <Tooltip title={disabled || taskNotFound ? '' : "Run this task"}>
+          <span>
+            <IconButton
+              size="small"
+              onClick={() => {
+                handleSegmentLeave(); // Close popover before running
+                onRun(taskId || label);
+              }}
+              disabled={disabled || taskNotFound}
+              sx={{ p: 0.5, ml: 0.5 }}
+            >
+              <PlayArrowIcon sx={{ fontSize: 16 }} />
+            </IconButton>
+          </span>
         </Tooltip>
       </span>
     </span>
-    {popoverAnchor && popoverContent && (
+    {!taskNotFound && popoverAnchor && popoverContent && (
       <Popover
         open={Boolean(popoverAnchor)}
         anchorEl={popoverAnchor}
@@ -631,6 +702,18 @@ function TaskLink({ label, taskId, displayLabel, onRun, onStop, onFocus, onOpenD
     )}
     </>
   );
+  
+  return tooltipTitle ? (
+    <Tooltip title={tooltipTitle}>
+      <Box component="span" sx={containerSx}>
+        {content}
+      </Box>
+    </Tooltip>
+  ) : containerSx && Object.keys(containerSx).length > 0 ? (
+    <Box component="span" sx={containerSx}>
+      {content}
+    </Box>
+  ) : content;
 }
 
 export default TaskLink;

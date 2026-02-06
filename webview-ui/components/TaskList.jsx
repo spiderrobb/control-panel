@@ -1,7 +1,7 @@
 import React from 'react';
 import TaskLink from './TaskLink';
 
-function TaskList({ labelStartsWith, tasks, onRun, onStop, onFocus, onOpenDefinition, runningTasks, starredTasks, onToggleStar, npmPathColorMap, setNpmPathColorMap }) {
+function TaskList({ labelStartsWith, tasks, onRun, onStop, onFocus, onOpenDefinition, runningTasks, starredTasks, onToggleStar, npmPathColorMap, setNpmPathColorMap, disabled }) {
 
   const filteredTasks = tasks.filter(task => 
     task.label.startsWith(labelStartsWith)
@@ -35,6 +35,7 @@ function TaskList({ labelStartsWith, tasks, onRun, onStop, onFocus, onOpenDefini
         onToggleStar={onToggleStar}
         npmPathColorMap={npmPathColorMap}
         setNpmPathColorMap={setNpmPathColorMap}
+        disabled={disabled}
       />
     </li>
   );

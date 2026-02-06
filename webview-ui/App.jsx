@@ -35,7 +35,13 @@ function TaskLinkWithState(props) {
   if (!ctx) return null;
 
   // Resolve task to get ID
-  let task = ctx.tasks?.find(t => t.id === props.label || t.label === props.label);
+  let task = ctx.tasks?.find(t => t.id === props.label);
+  if (!task && ctx.tasks) {
+    const matching = ctx.tasks.filter(t => t.label === props.label);
+    if (matching.length > 0) {
+      task = matching.find(t => t.source === 'Workspace') || matching[0];
+    }
+  }
   
   // Handle "npm: " prefix for legacy MDX support
   if (!task && props.label && props.label.startsWith('npm: ')) {
