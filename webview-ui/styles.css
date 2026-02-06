@@ -209,6 +209,119 @@ body {
   user-select: none;
 }
 
+.task-segments {
+  display: inline-flex;
+  align-items: stretch;
+  border: 1px solid rgba(128, 128, 128, 0.3);
+  border-radius: 3px;
+  overflow: hidden;
+  font-family: var(--vscode-editor-font-family);
+  flex: 1;
+}
+
+.task-segments-sequence .task-segment {
+  border-right: 1px solid var(--vscode-button-border);
+}
+
+.task-segments-sequence .task-segment:last-child {
+  border-right: none;
+}
+
+.task-segments-parallel {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-rows: repeat(var(--rows), minmax(24px, auto));
+  border: 1px solid rgba(128, 128, 128, 0.3);
+  border-radius: 3px;
+  overflow: hidden;
+  flex: 1;
+}
+
+.task-segment {
+  padding: 4px 8px;
+  font-size: 0.85em;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
+}
+
+.segment-parent {
+  font-weight: 500;
+}
+
+.segment-idle {
+  background-color: rgba(255, 255, 255, 0.05);
+  color: var(--vscode-foreground);
+}
+
+.segment-running {
+  position: relative;
+  background-color: rgba(137, 209, 133, 0.3);
+  color: var(--vscode-foreground);
+  overflow: hidden;
+}
+
+.segment-running::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0) 0%,
+    rgba(255, 255, 255, 0.18) 50%,
+    rgba(255, 255, 255, 0) 100%
+  );
+  animation: segment-shimmer 1.6s ease-in-out infinite;
+  pointer-events: none;
+}
+
+.segment-timer {
+  position: absolute;
+  left: 0;
+  right: auto;
+  bottom: 0;
+  height: 2px;
+  background-color: rgba(99, 158, 255, 0.7);
+  width: var(--segment-progress, 0%);
+  transition: width 0.3s ease;
+}
+
+.segment-timer-indeterminate {
+  width: 40%;
+  animation: segment-indeterminate 1.2s ease-in-out infinite;
+}
+
+@keyframes segment-shimmer {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes segment-indeterminate {
+  0% {
+    transform: translateX(-120%);
+  }
+  100% {
+    transform: translateX(220%);
+  }
+}
+
+.segment-success {
+  background-color: rgba(137, 209, 133, 0.4);
+  color: var(--vscode-foreground);
+}
+
+.segment-error {
+  background-color: rgba(244, 71, 71, 0.25);
+  color: var(--vscode-errorForeground);
+}
+
 .status-indicator {
   width: 8px;
   height: 8px;
@@ -355,6 +468,34 @@ body {
   }
   100% {
     background-position: 28px 0;
+  }
+}
+
+.task-pill.bg-shimmer {
+  position: relative;
+  overflow: hidden;
+}
+
+.task-pill.bg-shimmer::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0) 0%,
+    rgba(255, 255, 255, 0.16) 50%,
+    rgba(255, 255, 255, 0) 100%
+  );
+  animation: pill-shimmer 1.6s ease-in-out infinite;
+  pointer-events: none;
+}
+
+@keyframes pill-shimmer {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
   }
 }
 

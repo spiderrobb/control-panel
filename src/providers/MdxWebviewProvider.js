@@ -650,12 +650,16 @@ class MdxWebviewProvider {
 
   async sendTasksToWebview() {
     const tasks = await vscode.tasks.fetchTasks();
-    const taskList = await Promise.all(tasks.map(async task => ({
-      label: task.name,
-      detail: task.detail || '',
-      source: task.source,
-      dependsOn: await this.getTaskDependencies(task)
-    })));
+    const taskList = await Promise.all(tasks.map(async task => {
+      const dependencyInfo = await this.getTaskDependencyInfo(task);
+      return {
+        label: task.name,
+        detail: task.detail || '',
+        source: task.source,
+        dependsOn: dependencyInfo.dependsOn,
+        dependsOrder: dependencyInfo.dependsOrder
+      };
+    }));
 
     this._view?.webview.postMessage({
       type: 'updateTasks',
@@ -664,11 +668,22 @@ class MdxWebviewProvider {
   }
 
   async getTaskDependencies(task) {
+    const info = await this.getTaskDependencyInfo(task);
+    return info.dependsOn;
+  }
+
+  async getTaskDependencyInfo(task) {
+    let dependsOn = [];
+    let dependsOrder = 'parallel';
+
     // 1. Check definition (extension provided tasks)
     if (task.definition && task.definition.dependsOn) {
-      return Array.isArray(task.definition.dependsOn) 
-        ? task.definition.dependsOn 
+      dependsOn = Array.isArray(task.definition.dependsOn)
+        ? task.definition.dependsOn
         : [task.definition.dependsOn];
+      if (task.definition.dependsOrder) {
+        dependsOrder = task.definition.dependsOrder;
+      }
     }
     
     // 2. Check tasks.json (configured tasks)
@@ -695,10 +710,15 @@ class MdxWebviewProvider {
           
           if (config.tasks) {
             const taskConfig = config.tasks.find(t => t.label === task.name);
-            if (taskConfig && taskConfig.dependsOn) {
-              return Array.isArray(taskConfig.dependsOn) 
-                ? taskConfig.dependsOn 
-                : [taskConfig.dependsOn];
+            if (taskConfig) {
+              if (taskConfig.dependsOn) {
+                dependsOn = Array.isArray(taskConfig.dependsOn)
+                  ? taskConfig.dependsOn
+                  : [taskConfig.dependsOn];
+              }
+              if (taskConfig.dependsOrder) {
+                dependsOrder = taskConfig.dependsOrder;
+              }
             }
           }
         } catch (e) {
@@ -706,7 +726,8 @@ class MdxWebviewProvider {
         }
       }
     }
-    return [];
+
+    return { dependsOn, dependsOrder };
   }
 
   async runTask(label) {

@@ -32,6 +32,7 @@ const TaskStateContext = React.createContext(null);
 function TaskLinkWithState(props) {
   const ctx = useContext(TaskStateContext);
   if (!ctx) return null;
+  const task = ctx.tasks?.find(t => t.label === props.label);
   return (
     <TaskLink
       {...props}
@@ -41,6 +42,8 @@ function TaskLinkWithState(props) {
       onOpenDefinition={ctx.onOpenDefinition}
       taskState={ctx.runningTasks[props.label]}
       allRunningTasks={ctx.runningTasks}
+      dependencySegments={task?.dependsOn || []}
+      dependsOrder={task?.dependsOrder}
       starredTasks={ctx.starredTasks}
       onToggleStar={ctx.onToggleStar}
     />
