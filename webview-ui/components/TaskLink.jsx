@@ -12,6 +12,7 @@ import StarIcon from '@mui/icons-material/Star';
 import StarBorderIcon from '@mui/icons-material/StarBorder';
 import FiberManualRecordIcon from '@mui/icons-material/FiberManualRecord';
 import PauseIcon from '@mui/icons-material/Pause';
+import { useTaskState } from '../context';
 
 // Define 10 VS Code theme colors for npm path color-coding
 const NPM_CHIP_COLORS = [
@@ -33,7 +34,21 @@ const normalizePath = (path) => {
   return path.trim().toLowerCase().replace(/^\.\//, '');
 };
 
-function TaskLink({ label, taskId, displayLabel, onRun, onStop, onFocus, onOpenDefinition, taskState, allRunningTasks, dependencySegments = [], dependsOrder, tasks = [], starredTasks, onToggleStar, npmPathColorMap, setNpmPathColorMap, disabled = false }) {
+function TaskLink({ label, taskId, displayLabel, disabled = false }) {
+  const {
+      tasks,
+      runningTasks,
+      onRun,
+      onStop,
+      onFocus,
+      onOpenDefinition,
+      starredTasks,
+      onToggleStar,
+      npmPathColorMap,
+      setNpmPathColorMap,
+      taskHistoryMap
+  } = useTaskState();
+
   const [runtime, setRuntime] = useState(0);
   const [progress, setProgress] = useState(0);
   const [segmentTick, setSegmentTick] = useState(0);
@@ -41,22 +56,35 @@ function TaskLink({ label, taskId, displayLabel, onRun, onStop, onFocus, onOpenD
   const [popoverContent, setPopoverContent] = useState(null);
   
   // Get current task info - prefer ID if available
-  const currentTask = taskId 
-    ? tasks.find(t => t.id === taskId) 
-    : (() => {
+  let currentTask = taskId ? tasks.find(t => t.id === taskId) : null;
+  
+  // Fallback to label lookup if ID not found or not provided
+  if (!currentTask && tasks.length > 0) {
+      if (taskId) {
+        currentTask = tasks.find(t => t.id === taskId);
+      } else if (label) {
         const matching = tasks.filter(t => t.label === label);
-        return matching.find(t => t.source === 'Workspace') || matching[0];
-      })();
+        currentTask = matching.find(t => t.source === 'Workspace') || matching[0];
+        
+        // Handle "npm: " prefix for legacy MDX support
+        if (!currentTask && label.startsWith('npm: ')) {
+          const scriptName = label.substring(5);
+          currentTask = tasks.find(t => t.source === 'npm' && t.label === scriptName);
+        }
+      }
+  }
     
   // Detect if task definition is missing
   const taskNotFound = !currentTask;
+  const resolvedLabel = currentTask?.label || label;
+  const resolvedId = currentTask?.id;
   
   const isNpmTask = currentTask?.source === 'npm';
   const npmPath = currentTask?.definition?.path;
   const scriptName = currentTask?.definition?.script;
   
   // For npm tasks, use script name from definition, otherwise use displayLabel/label
-  const displayText = isNpmTask && scriptName ? scriptName : (displayLabel || label);
+  const displayText = isNpmTask && scriptName ? scriptName : (displayLabel || resolvedLabel);
   
   // Get or assign color for npm path
   const getNpmColor = (path) => {
@@ -72,12 +100,25 @@ function TaskLink({ label, taskId, displayLabel, onRun, onStop, onFocus, onOpenD
       const assignedColors = Object.values(npmPathColorMap || {});
       const nextColorIndex = assignedColors.length % NPM_CHIP_COLORS.length;
       const newColor = NPM_CHIP_COLORS[nextColorIndex];
-      setNpmPathColorMap(prev => ({ ...prev, [normalized]: newColor }));
-      return newColor;
+      // Note: We avoid setting state in render, ideally this should be done in an effect or event
+      // For now, we return default if not set, and rely on app consistent hashing if simpler
+      // But preserving original behavior:
+      // setNpmPathColorMap is called here in original code, which is risky for render loops
+      // but if cached, it returns immediately.
+      // We will skip calling set state here to avoid loops in this refactor and just pick based on hash or index
+      // But assuming the context provides the map.
     }
     
-    return NPM_CHIP_COLORS[0];
+    // Simple deterministic color if not in map
+    let hash = 0;
+    for (let i = 0; i < normalized.length; i++) {
+        hash = normalized.charCodeAt(i) + ((hash << 5) - hash);
+    }
+    const index = Math.abs(hash) % NPM_CHIP_COLORS.length;
+    return NPM_CHIP_COLORS[index];
   };
+
+  const taskState = runningTasks[resolvedId] || runningTasks[label];
 
   const isRunning = taskState?.running || false;
   const isFailed = taskState?.failed || false;
@@ -90,8 +131,12 @@ function TaskLink({ label, taskId, displayLabel, onRun, onStop, onFocus, onOpenD
   const failedDependency = taskState?.failedDependency;
   const canStop = taskState?.canStop !== false;
   const canFocus = taskState?.canFocus !== false;
+  
+  const dependencySegments = currentTask?.dependsOn || [];
+  const dependsOrder = currentTask?.dependsOrder;
+  
   const hasDependencies = dependencySegments.length > 0;
-  const hasRunningSegment = isRunning || dependencySegments.some(dep => allRunningTasks?.[dep]?.running);
+  const hasRunningSegment = isRunning || dependencySegments.some(dep => runningTasks[dep]?.running);
 
   // Update runtime and progress every second when task is running
   useEffect(() => {
@@ -165,7 +210,11 @@ function TaskLink({ label, taskId, displayLabel, onRun, onStop, onFocus, onOpenD
   };
 
   const getSegmentState = (taskLabel) => {
-    const state = allRunningTasks?.[taskLabel];
+      // Find task ID for this label if possible
+      const t = tasks.find(t => t.label === taskLabel);
+      const tid = t?.id || taskLabel;
+      const state = runningTasks[tid] || runningTasks[taskLabel];
+
     if (state?.failed) return 'error';
     if (state?.running) return 'running';
     return 'idle';
@@ -210,8 +259,11 @@ function TaskLink({ label, taskId, displayLabel, onRun, onStop, onFocus, onOpenD
     if (segmentState === 'success' || segmentState === 'error') {
       return { progress: 100, indeterminate: false };
     }
+    
+    const t = tasks.find(t => t.label === segmentLabel);
+    const tid = t?.id || segmentLabel;
+    const segmentTaskState = runningTasks[tid] || runningTasks[segmentLabel];
 
-    const segmentTaskState = segmentLabel === label ? taskState : allRunningTasks?.[segmentLabel];
     if (!segmentTaskState?.running || !segmentTaskState?.startTime) {
       return { progress: 0, indeterminate: false };
     }
@@ -224,6 +276,20 @@ function TaskLink({ label, taskId, displayLabel, onRun, onStop, onFocus, onOpenD
     const elapsed = now - segmentTaskState.startTime;
     const progressValue = Math.min((elapsed / segmentTaskState.avgDuration) * 100, 99);
     return { progress: progressValue, indeterminate: false };
+  };
+
+  const calculateAvgDuration = (taskLabel) => {
+    // If task is running, use its avgDuration from state (most up-to-date)
+    const t = tasks.find(t => t.label === taskLabel);
+    const tid = t?.id || taskLabel;
+    const runningState = runningTasks[tid] || runningTasks[taskLabel];
+
+    if (runningState?.avgDuration) {
+      return runningState.avgDuration;
+    }
+    
+    // Otherwise, use historical data from execution history
+    return taskHistoryMap[tid] || taskHistoryMap[taskLabel] || null;
   };
 
   const getTaskInfo = (taskLabel) => {
@@ -244,7 +310,6 @@ function TaskLink({ label, taskId, displayLabel, onRun, onStop, onFocus, onOpenD
       }
 
       // Fallback: If ID looks like an npm task, assume root package.json
-      // We avoid parsing strings (e.g. split(':')) to prevent misidentification of root scripts
       if (typeof idOrLabel === 'string' && idOrLabel.startsWith('npm|')) {
         return 'package.json';
       }
@@ -260,28 +325,36 @@ function TaskLink({ label, taskId, displayLabel, onRun, onStop, onFocus, onOpenD
       return command ? `${taskType}: ${command}` : `${taskType}: `;
     };
     
-    if (taskLabel === label || taskLabel === taskId) {
+    // Check if we are looking at the main task or a dependency
+    const isMainTask = taskLabel === label || taskLabel === resolvedId;
+    
+    if (isMainTask) {
       return {
         name: label,
-        source: taskData?.source,
-        sourceFile: getSourceFile(taskData, taskLabel),
-        script: formatCommandString(taskData),
+        source: currentTask?.source,
+        sourceFile: getSourceFile(currentTask, taskLabel),
+        script: formatCommandString(currentTask),
         status: isFailed ? 'failed' : (isRunning ? 'running' : 'idle'),
         duration: runtime,
         progress: progress,
+        avgDuration: calculateAvgDuration(taskLabel),
         exitCode: exitCode,
         failureReason: failureReason
       };
     }
-    const segmentState = allRunningTasks?.[taskLabel];
-    const segmentTaskData = tasks?.find(t => t.id === taskLabel || t.label === taskLabel);
+    
+    const t = tasks.find(t => t.label === taskLabel);
+    const tid = t?.id || taskLabel;
+    const segmentState = runningTasks[tid] || runningTasks[taskLabel];
+    
     return {
-      name: segmentTaskData?.label || taskLabel,
-      source: segmentTaskData?.source || 'unknown',
-      sourceFile: getSourceFile(segmentTaskData, taskLabel),
-      script: formatCommandString(segmentTaskData),
+      name: taskData?.label || taskLabel,
+      source: taskData?.source || 'unknown',
+      sourceFile: getSourceFile(taskData, taskLabel),
+      script: formatCommandString(taskData),
       status: segmentState?.failed ? 'failed' : (segmentState?.running ? 'running' : 'idle'),
       duration: segmentState?.startTime ? Date.now() - segmentState.startTime : 0,
+      avgDuration: calculateAvgDuration(taskLabel),
       exitCode: segmentState?.exitCode,
       failureReason: segmentState?.failureReason
     };
@@ -385,7 +458,7 @@ function TaskLink({ label, taskId, displayLabel, onRun, onStop, onFocus, onOpenD
       return (
         <span
           className="task-label"
-          onDoubleClick={disabled || taskNotFound ? undefined : () => onOpenDefinition(taskId || label)}
+          onDoubleClick={disabled || taskNotFound ? undefined : () => onOpenDefinition(resolvedId || label)}
           title={disabled || taskNotFound ? undefined : "Double-click to open task definition in tasks.json"}
         >
           {isNpmTask && (
@@ -438,21 +511,21 @@ function TaskLink({ label, taskId, displayLabel, onRun, onStop, onFocus, onOpenD
           <div 
             className={`task-pill ${hasDependencies ? getParentBackgroundClass() : getBackgroundClass()}`} 
             style={getProgressStyle()}
-            onMouseEnter={(e) => handleSegmentHover(e, taskId || label)}
+            onMouseEnter={(e) => handleSegmentHover(e, resolvedId || label)}
             onMouseLeave={handleSegmentLeave}
           >
-          <Tooltip title={disabled || taskNotFound ? '' : (starredTasks?.includes(taskId || label) ? 'Remove from starred tasks' : 'Add to starred tasks')}>
+          <Tooltip title={disabled || taskNotFound ? '' : (starredTasks?.includes(resolvedId || label) ? 'Remove from starred tasks' : 'Add to starred tasks')}>
             <span>
               <IconButton
                 size="small"
                 onClick={(e) => {
                   e.stopPropagation();
-                  onToggleStar?.(taskId || label);
+                  onToggleStar?.(resolvedId || label);
                 }}
                 disabled={disabled || taskNotFound}
                 sx={{ p: 0.5, color: 'inherit' }}
               >
-                {starredTasks?.includes(taskId || label) ? <StarIcon sx={{ fontSize: 16 }} /> : <StarBorderIcon sx={{ fontSize: 16 }} />}
+                {starredTasks?.includes(resolvedId || label) ? <StarIcon sx={{ fontSize: 16 }} /> : <StarBorderIcon sx={{ fontSize: 16 }} />}
               </IconButton>
             </span>
           </Tooltip>
@@ -473,7 +546,7 @@ function TaskLink({ label, taskId, displayLabel, onRun, onStop, onFocus, onOpenD
                     size="small"
                     onClick={() => {
                       handleSegmentLeave(); // Close popover before retrying
-                      onRun(taskId || label);
+                      onRun(resolvedId || label);
                     }}
                     disabled={disabled || taskNotFound}
                     sx={{ p: 0.5, ml: 0.5 }}
@@ -490,7 +563,7 @@ function TaskLink({ label, taskId, displayLabel, onRun, onStop, onFocus, onOpenD
                 <span>
                   <IconButton
                     size="small"
-                    onClick={() => onFocus(taskId || label)}
+                    onClick={() => onFocus(resolvedId || label)}
                     disabled={!canFocus || disabled || taskNotFound}
                     sx={{ p: 0.5, ml: 0.5 }}
                   >
@@ -502,7 +575,7 @@ function TaskLink({ label, taskId, displayLabel, onRun, onStop, onFocus, onOpenD
                 <span>
                   <IconButton
                     size="small"
-                    onClick={() => onStop(taskId || label)}
+                    onClick={() => onStop(resolvedId || label)}
                     disabled={!canStop || taskNotFound}
                     sx={{ p: 0.5 }}
                   >
@@ -517,7 +590,11 @@ function TaskLink({ label, taskId, displayLabel, onRun, onStop, onFocus, onOpenD
         {hasSubtasks && (
           <div className="subtasks-container">
             {subtasks.map((subtask, index) => {
-              const subtaskRunning = allRunningTasks?.[subtask]?.running;
+              // Find child running state
+              const cTask = tasks.find(t => t.id === subtask || t.label === subtask);
+              const cId = cTask?.id || subtask;
+              const subtaskRunning = runningTasks[cId]?.running;
+              
               return (
                 <div key={index} className="subtask-item">
                   <span className={`subtask-indicator ${subtaskRunning ? 'running' : 'waiting'}`}>
@@ -575,6 +652,11 @@ function TaskLink({ label, taskId, displayLabel, onRun, onStop, onFocus, onOpenD
                 Progress: <span style={{ fontWeight: 500 }}>{Math.floor(popoverContent.progress)}%</span>
               </Typography>
             )}
+            {popoverContent.avgDuration > 0 && (
+              <Typography variant="caption" sx={{ display: 'block', mb: 0.5, opacity: 0.8 }}>
+                Avg Runtime: <span style={{ fontWeight: 500 }}>{formatRuntime(popoverContent.avgDuration)}</span>
+              </Typography>
+            )}
             {popoverContent.failureReason && (
               <Typography variant="caption" sx={{ display: 'block', color: 'error.main', mt: 0.75 }}>
                 {popoverContent.failureReason}
@@ -609,21 +691,21 @@ function TaskLink({ label, taskId, displayLabel, onRun, onStop, onFocus, onOpenD
       <span className="task-link">
         <span
           className="task-expanded"
-          onMouseEnter={(e) => handleSegmentHover(e, taskId || label)}
+          onMouseEnter={(e) => handleSegmentHover(e, resolvedId || label)}
           onMouseLeave={handleSegmentLeave}
         >
-        <Tooltip title={disabled || taskNotFound ? '' : (starredTasks?.includes(taskId || label) ? 'Remove from starred tasks' : 'Add to starred tasks')}>
+        <Tooltip title={disabled || taskNotFound ? '' : (starredTasks?.includes(resolvedId || label) ? 'Remove from starred tasks' : 'Add to starred tasks')}>
           <span>
             <IconButton
               size="small"
               onClick={(e) => {
                 e.stopPropagation();
-                onToggleStar?.(taskId || label);
+                onToggleStar?.(resolvedId || label);
               }}
               disabled={disabled || taskNotFound}
               sx={{ p: 0.5, color: 'inherit' }}
             >
-              {starredTasks?.includes(taskId || label) ? <StarIcon sx={{ fontSize: 16 }} /> : <StarBorderIcon sx={{ fontSize: 16 }} />}
+              {starredTasks?.includes(resolvedId || label) ? <StarIcon sx={{ fontSize: 16 }} /> : <StarBorderIcon sx={{ fontSize: 16 }} />}
             </IconButton>
           </span>
         </Tooltip>
@@ -634,7 +716,7 @@ function TaskLink({ label, taskId, displayLabel, onRun, onStop, onFocus, onOpenD
               size="small"
               onClick={() => {
                 handleSegmentLeave(); // Close popover before running
-                onRun(taskId || label);
+                onRun(resolvedId || label);
               }}
               disabled={disabled || taskNotFound}
               sx={{ p: 0.5, ml: 0.5 }}
@@ -685,6 +767,11 @@ function TaskLink({ label, taskId, displayLabel, onRun, onStop, onFocus, onOpenD
           {popoverContent.progress > 0 && popoverContent.status === 'running' && (
             <Typography variant="caption" sx={{ display: 'block', mb: 0.5, opacity: 0.8 }}>
               Progress: <span style={{ fontWeight: 500 }}>{Math.floor(popoverContent.progress)}%</span>
+            </Typography>
+          )}
+          {popoverContent.avgDuration > 0 && (
+            <Typography variant="caption" sx={{ display: 'block', mb: 0.5, opacity: 0.8 }}>
+              Avg Runtime: <span style={{ fontWeight: 500 }}>{formatRuntime(popoverContent.avgDuration)}</span>
             </Typography>
           )}
           {popoverContent.failureReason && (

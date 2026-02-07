@@ -22,7 +22,10 @@ const extensionConfig = {
         test: /\.js$/,
         exclude: /node_modules/,
         use: {
-          loader: 'babel-loader'
+          loader: 'babel-loader',
+          options: {
+            configFile: './.babelrc'
+          }
         }
       }
     ]
@@ -52,7 +55,7 @@ const webviewConfig = {
         use: {
           loader: 'babel-loader',
           options: {
-            presets: ['@babel/preset-react']
+            configFile: './.babelrc'
           }
         }
       },
@@ -62,7 +65,7 @@ const webviewConfig = {
           {
             loader: 'babel-loader',
             options: {
-              presets: ['@babel/preset-react']
+              configFile: './.babelrc'
             }
           },
           {

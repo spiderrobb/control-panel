@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef, useCallback, useContext } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { evaluate } from '@mdx-js/mdx';
 import * as runtime from 'react/jsx-runtime';
 import DescriptionIcon from '@mui/icons-material/Description';
@@ -25,96 +25,97 @@ import RecentTasksList from './components/RecentTasksList';
 import StarredTasksList from './components/StarredTasksList';
 import ExecutionHistoryPanel from './components/ExecutionHistoryPanel';
 
-// VS Code API
-const vscode = acquireVsCodeApi();
+import { TaskStateProvider, useTaskState, vscode } from './context';
 
-const TaskStateContext = React.createContext(null);
-
-function TaskLinkWithState(props) {
-  const ctx = useContext(TaskStateContext);
-  if (!ctx) return null;
-
-  // Resolve task to get ID
-  let task = ctx.tasks?.find(t => t.id === props.label);
-  if (!task && ctx.tasks) {
-    const matching = ctx.tasks.filter(t => t.label === props.label);
-    if (matching.length > 0) {
-      task = matching.find(t => t.source === 'Workspace') || matching[0];
+// Utility to generate heading IDs from text (slug generation)
+function generateHeadingId(text) {
+  if (typeof text !== 'string') {
+    // If text is a React element or array, extract text content
+    if (React.isValidElement(text)) {
+      return generateHeadingId(text.props.children);
     }
+    if (Array.isArray(text)) {
+      return generateHeadingId(text.map(t => generateHeadingId(t)).join(''));
+    }
+    return String(text || '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-|-$/g, '');
   }
-  
-  // Handle "npm: " prefix for legacy MDX support
-  if (!task && props.label && props.label.startsWith('npm: ')) {
-    const scriptName = props.label.substring(5);
-    task = ctx.tasks?.find(t => t.source === 'npm' && t.label === scriptName);
-  }
-
-  const taskId = task?.id;
-  const taskState = taskId ? ctx.runningTasks[taskId] : ctx.runningTasks[props.label];
-
-  return (
-    <TaskLink
-      {...props}
-      taskId={taskId}
-      displayLabel={task?.displayLabel}
-      onRun={ctx.onRun}
-      onStop={ctx.onStop}
-      onFocus={ctx.onFocus}
-      onOpenDefinition={ctx.onOpenDefinition}
-      taskState={taskState}
-      allRunningTasks={ctx.runningTasks}
-      dependencySegments={task?.dependsOn || []}
-      dependsOrder={task?.dependsOrder}
-      tasks={ctx.tasks}
-      starredTasks={ctx.starredTasks}
-      onToggleStar={ctx.onToggleStar}
-      npmPathColorMap={ctx.npmPathColorMap}
-      setNpmPathColorMap={ctx.setNpmPathColorMap}
-    />
-  );
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '');
 }
 
 function TaskListWithState(props) {
-  const ctx = useContext(TaskStateContext);
-  if (!ctx) return null;
+  const { 
+    tasks, 
+    runningTasks, 
+    onRun, 
+    onStop, 
+    onFocus, 
+    onOpenDefinition, 
+    starredTasks, 
+    onToggleStar, 
+    npmPathColorMap, 
+    setNpmPathColorMap 
+  } = useTaskState();
+
   return (
     <TaskList
       {...props}
-      tasks={ctx.tasks}
-      onRun={ctx.onRun}
-      onStop={ctx.onStop}
-      onFocus={ctx.onFocus}
-      onOpenDefinition={ctx.onOpenDefinition}
-      runningTasks={ctx.runningTasks}
-      starredTasks={ctx.starredTasks}
-      onToggleStar={ctx.onToggleStar}
-      npmPathColorMap={ctx.npmPathColorMap}
-      setNpmPathColorMap={ctx.setNpmPathColorMap}
+      tasks={tasks}
+      onRun={onRun}
+      onStop={onStop}
+      onFocus={onFocus}
+      onOpenDefinition={onOpenDefinition}
+      runningTasks={runningTasks}
+      starredTasks={starredTasks}
+      onToggleStar={onToggleStar}
+      npmPathColorMap={npmPathColorMap}
+      setNpmPathColorMap={setNpmPathColorMap}
     />
   );
 }
 
-function App() {
+function ControlPanel() {
+  const {
+      tasks, 
+      runningTasks, 
+      starredTasks, 
+      recentlyUsedTasks, 
+      executionHistory, 
+      runningTasksCollapsed, 
+      starredTasksCollapsed,
+      onRun,
+      onStop,
+      onFocus,
+      onOpenDefinition,
+      onToggleStar,
+      onDismissTask,
+      onToggleRunningTasksCollapsed,
+      onToggleStarredTasksCollapsed
+  } = useTaskState();
+
   const [mdxContent, setMdxContent] = useState(null);
   const [currentFile, setCurrentFile] = useState('');
-  const [tasks, setTasks] = useState([]);
-  const [runningTasks, setRunningTasks] = useState({});
   const [logBuffer, setLogBuffer] = useState([]);
-  const [recentlyUsedTasks, setRecentlyUsedTasks] = useState([]);
-  const [starredTasks, setStarredTasks] = useState([]);
   const [navigationHistory, setNavigationHistory] = useState([]);
   const [navigationIndex, setNavigationIndex] = useState(-1);
   const [historyMenuAnchor, setHistoryMenuAnchor] = useState(null);
   const [showHistory, setShowHistory] = useState(false);
   const [lastViewedDocument, setLastViewedDocument] = useState('');
-  const [executionHistory, setExecutionHistory] = useState([]);
-  const [runningTasksCollapsed, setRunningTasksCollapsed] = useState(false);
-  const [starredTasksCollapsed, setStarredTasksCollapsed] = useState(false);
-  const [npmPathColorMap, setNpmPathColorMap] = useState({});
+  
+  // Local state for compilation
+  const [MdxModule, setMdxModule] = useState(null);
+  const [mdxError, setMdxError] = useState(null);
+  const [isCompiling, setIsCompiling] = useState(false);
+  
   const contentRef = useRef(null);
 
   useEffect(() => {
-    // Listen for messages from the extension
+    // Listen for messages from the extension (only those not handled by context)
     const messageHandler = (event) => {
       const message = event.data;
       
@@ -123,155 +124,12 @@ function App() {
           setMdxContent(message.content);
           setCurrentFile(message.file);
           break;
-        case 'updateTasks':
-          setTasks(message.tasks);
-          break;
-        case 'taskStarted':
-          setRunningTasks(prev => {
-            // Check if this task is already a subtask of another running task
-            const parentEntry = Object.entries(prev).find(([_parentLabel, state]) => 
-              state.subtasks?.includes(message.taskLabel)
-            );
-            
-            return {
-              ...prev,
-              [message.taskLabel]: {
-                running: true,
-                startTime: message.startTime || Date.now(),
-                execution: message.execution,
-                avgDuration: message.avgDuration,
-                isFirstRun: message.isFirstRun,
-                subtasks: message.subtasks || [],
-                parentTask: parentEntry ? parentEntry[0] : null,
-                state: message.state || 'running'
-              }
-            };
-          });
-          break;
-        case 'taskEnded':
-          setRunningTasks(prev => {
-            const updated = { ...prev };
-            if (updated[message.taskLabel]) {
-              updated[message.taskLabel].running = false;
-              // Remove after a short delay for smooth transition
-              setTimeout(() => {
-                setRunningTasks(current => {
-                  const copy = { ...current };
-                  delete copy[message.taskLabel];
-                  return copy;
-                });
-              }, 1000);
-            }
-            return updated;
-          });
-          break;
-        case 'taskFailed':
-          setRunningTasks(prev => {
-            const updated = { ...prev };
-            if (updated[message.taskLabel]) {
-              updated[message.taskLabel].running = false;
-              updated[message.taskLabel].failed = true;
-              updated[message.taskLabel].exitCode = message.exitCode;
-              updated[message.taskLabel].failureReason = message.reason;
-              updated[message.taskLabel].failedDependency = message.failedDependency;
-            } else {
-              // Task might not be in state yet, add it as failed
-              updated[message.taskLabel] = {
-                running: false,
-                failed: true,
-                exitCode: message.exitCode,
-                failureReason: message.reason,
-                failedDependency: message.failedDependency,
-                startTime: Date.now() - (message.duration || 0),
-                subtasks: message.subtasks || []
-              };
-            }
-            // Keep failed tasks visible until dismissed or re-run
-            return updated;
-          });
-          break;
-        case 'taskStateChanged':
-          setRunningTasks(prev => {
-            if (!prev[message.taskLabel]) return prev;
-            const updated = { ...prev };
-            updated[message.taskLabel] = {
-              ...updated[message.taskLabel],
-              state: message.state,
-              canStop: message.canStop !== undefined ? message.canStop : true,
-              canFocus: message.canFocus !== undefined ? message.canFocus : true
-            };
-            return updated;
-          });
-          break;
-        case 'subtaskStarted':
-          setRunningTasks(prev => {
-            const updated = { ...prev };
-            if (!updated[message.parentLabel]) {
-              updated[message.parentLabel] = {
-                running: true,
-                startTime: message.parentStartTime || Date.now(),
-                subtasks: [],
-                state: 'running',
-                canFocus: false
-              };
-            }
-
-            const subtasks = [...(updated[message.parentLabel].subtasks || [])];
-            if (!subtasks.includes(message.childLabel)) {
-              subtasks.push(message.childLabel);
-              updated[message.parentLabel] = {
-                ...updated[message.parentLabel],
-                subtasks
-              };
-            }
-            return updated;
-          });
-          break;
-        case 'subtaskEnded':
-          setRunningTasks(prev => {
-            if (!prev[message.parentLabel]) return prev;
-            
-            const updated = { ...prev };
-            const subtasks = (updated[message.parentLabel].subtasks || [])
-              .filter(label => label !== message.childLabel);
-            updated[message.parentLabel] = {
-              ...updated[message.parentLabel],
-              subtasks
-            };
-            
-            // If subtask failed, mark it in parent's state
-            if (message.failed) {
-              if (!updated[message.parentLabel].failedSubtasks) {
-                updated[message.parentLabel].failedSubtasks = [];
-              }
-              updated[message.parentLabel].failedSubtasks.push({
-                label: message.childLabel,
-                exitCode: message.exitCode
-              });
-            }
-            
-            return updated;
-          });
-          break;
-        case 'updateRecentlyUsed':
-          setRecentlyUsedTasks(message.tasks);
-          break;
-        case 'updateStarred':
-          setStarredTasks(message.tasks);
-          break;
         case 'updateNavigationHistory':
           setNavigationHistory(message.history);
           setNavigationIndex(message.index);
           break;
         case 'logBuffer':
           setLogBuffer(message.entries || []);
-          break;
-        case 'executionHistory':
-          setExecutionHistory(message.history || []);
-          break;
-        case 'panelState':
-          setRunningTasksCollapsed(Boolean(message.state?.runningTasksCollapsed));
-          setStarredTasksCollapsed(Boolean(message.state?.starredTasksCollapsed));
           break;
         case 'error':
           console.warn(message.message);
@@ -281,10 +139,8 @@ function App() {
 
     window.addEventListener('message', messageHandler);
     
-    // Request initial content
+    // Request initial content (app specific)
     vscode.postMessage({ type: 'ready' });
-    vscode.postMessage({ type: 'getTaskLists' });
-    vscode.postMessage({ type: 'getPanelState' });
 
     return () => window.removeEventListener('message', messageHandler);
   }, []);
@@ -306,60 +162,12 @@ function App() {
     setHistoryMenuAnchor(null);
   };
 
-  const handleRunTask = (label) => {
-    vscode.postMessage({ type: 'runTask', label });
-  };
-
-  const handleStopTask = (label) => {
-    vscode.postMessage({ type: 'stopTask', label });
-  };
-
-  const handleFocusTerminal = (label) => {
-    vscode.postMessage({ type: 'focusTerminal', label });
-  };
-
-  const handleOpenDefinition = (label) => {
-    vscode.postMessage({ type: 'openTaskDefinition', label });
-  };
-
-  const handleToggleStar = (label) => {
-    vscode.postMessage({ type: 'toggleStar', label });
-  };
-
-  const handleDismissTask = (label) => {
-    setRunningTasks(prev => {
-      const updated = { ...prev };
-      delete updated[label];
-      return updated;
-    });
-    // Notify extension to clear persisted failure
-    vscode.postMessage({ type: 'dismissTask', label });
-  };
-
   const handleShowLogs = () => {
     vscode.postMessage({ type: 'showLogs' });
   };
 
   const handleRequestLogBuffer = () => {
     vscode.postMessage({ type: 'getLogBuffer' });
-  };
-
-  const handleToggleRunningTasksCollapsed = () => {
-    const next = !runningTasksCollapsed;
-    setRunningTasksCollapsed(next);
-    vscode.postMessage({
-      type: 'setPanelState',
-      state: { runningTasksCollapsed: next }
-    });
-  };
-
-  const handleToggleStarredTasksCollapsed = () => {
-    const next = !starredTasksCollapsed;
-    setStarredTasksCollapsed(next);
-    vscode.postMessage({
-      type: 'setPanelState',
-      state: { starredTasksCollapsed: next }
-    });
   };
 
   const handleToggleHistory = () => {
@@ -381,15 +189,10 @@ function App() {
     vscode.postMessage({ type: 'copyTasksJson' });
   };
 
-  // State for compiled MDX component
-  const [MdxModule, setMdxModule] = useState(null);
-  const [mdxError, setMdxError] = useState(null);
-  const [isCompiling, setIsCompiling] = useState(false);
-
   // Create MDX components object with all available components
   const mdxComponents = useMemo(() => ({
     // Custom task components
-    TaskLink: TaskLinkWithState,
+    TaskLink: TaskLink, // Uses context internally now
     TaskList: TaskListWithState,
     // Material UI components
     Button,
@@ -398,7 +201,32 @@ function App() {
     Chip,
     // All Material UI icons
     ...MuiIcons,
-    // Custom link handler for .mdx navigation
+    // Custom heading components with ID attributes for anchor linking
+    h1: (props) => {
+      const id = generateHeadingId(props.children);
+      return <h1 id={id} {...props} />;
+    },
+    h2: (props) => {
+      const id = generateHeadingId(props.children);
+      return <h2 id={id} {...props} />;
+    },
+    h3: (props) => {
+      const id = generateHeadingId(props.children);
+      return <h3 id={id} {...props} />;
+    },
+    h4: (props) => {
+      const id = generateHeadingId(props.children);
+      return <h4 id={id} {...props} />;
+    },
+    h5: (props) => {
+      const id = generateHeadingId(props.children);
+      return <h5 id={id} {...props} />;
+    },
+    h6: (props) => {
+      const id = generateHeadingId(props.children);
+      return <h6 id={id} {...props} />;
+    },
+    // Custom link handler for .mdx navigation and anchor links
     a: (props) => {
       if (props.href?.endsWith('.mdx')) {
         return (
@@ -408,6 +236,29 @@ function App() {
             onClick={(e) => {
               e.preventDefault();
               handleNavigate(props.href);
+            }}
+          />
+        );
+      }
+      // Handle anchor links (internal page navigation)
+      if (props.href?.startsWith('#')) {
+        return (
+          <a
+            {...props}
+            onClick={(e) => {
+              e.preventDefault();
+              const targetId = props.href.slice(1);
+              const targetElement = document.getElementById(targetId);
+              if (targetElement && contentRef.current) {
+                const contentTop = contentRef.current.offsetTop;
+                const elementTop = targetElement.offsetTop;
+                contentRef.current.scrollTo({
+                  top: elementTop - contentTop - 16, // 16px padding offset
+                  behavior: 'smooth'
+                });
+                // Remove focus from the link to prevent scroll-to-top bug
+                e.target.blur();
+              }
             }}
           />
         );
@@ -446,26 +297,6 @@ function App() {
     compileMDX();
   }, [mdxContent, mdxComponents]);
 
-  const taskContextValue = useMemo(() => ({
-    tasks,
-    runningTasks,
-    starredTasks,
-    onRun: handleRunTask,
-    onStop: handleStopTask,
-    onFocus: handleFocusTerminal,
-    onOpenDefinition: handleOpenDefinition,
-    onToggleStar: handleToggleStar
-  }), [
-    tasks,
-    runningTasks,
-    starredTasks,
-    handleRunTask,
-    handleStopTask,
-    handleFocusTerminal,
-    handleOpenDefinition,
-    handleToggleStar
-  ]);
-
   const handleContentScroll = useCallback((event) => {
     if (showHistory || !currentFile) return;
     const scrollTop = event.currentTarget.scrollTop;
@@ -494,6 +325,29 @@ function App() {
     });
   }, [showHistory, currentFile, mdxContent, MdxModule]);
 
+  // Handle initial hash navigation (if URL contains #anchor)
+  useEffect(() => {
+    if (showHistory || !MdxModule || !contentRef.current) return;
+    
+    // Check if there's a hash in the message from extension
+    // This would be used if we want to navigate to a specific section on load
+    const hash = window.location.hash;
+    if (hash) {
+      const targetId = hash.slice(1);
+      const targetElement = document.getElementById(targetId);
+      if (targetElement) {
+        const contentTop = contentRef.current.offsetTop;
+        const elementTop = targetElement.offsetTop;
+        requestAnimationFrame(() => {
+          contentRef.current.scrollTo({
+            top: elementTop - contentTop - 16,
+            behavior: 'smooth'
+          });
+        });
+      }
+    }
+  }, [showHistory, MdxModule]);
+
   if (!mdxContent) {
     return (
       <div className="loading">
@@ -502,18 +356,16 @@ function App() {
     );
   }
 
-  return (
-    <TaskStateContext.Provider value={taskContextValue}>
+  // If showing execution history
+  if (showHistory) {
+    return (
       <div className="app">
-        {currentFile && (
           <div className="breadcrumb">
-            {showHistory ? (
-              <>
-                <div className="breadcrumb-trail">
+            <div className="breadcrumb-trail">
                   <HistoryIcon sx={{ fontSize: 16, mr: 0.5, verticalAlign: 'text-bottom' }} />
                   <span className="current-file">Task Execution History</span>
-                </div>
-                <div className="breadcrumb-actions">
+            </div>
+            <div className="breadcrumb-actions">
                   <Tooltip title="Close execution history">
                     <IconButton
                       size="small"
@@ -523,10 +375,23 @@ function App() {
                       <CloseIcon sx={{ fontSize: 18 }} />
                     </IconButton>
                   </Tooltip>
-                </div>
-              </>
-            ) : (
-              <>
+            </div>
+          </div>
+          <div className="content scrollable">
+            <ExecutionHistoryPanel 
+              history={executionHistory} 
+              onRunTask={onRun}
+              allTasks={tasks} 
+            />
+          </div>
+      </div>
+    );
+  }
+
+  return (
+      <div className="app">
+        {currentFile && (
+          <div className="breadcrumb">
                 <div className="breadcrumb-navigation">
                   <Tooltip title="Back">
                     <span>
@@ -663,14 +528,9 @@ function App() {
                     </IconButton>
                   </Tooltip>
                 </div>
-              </>
-            )}
           </div>
         )}
         <div className="content" ref={contentRef} onScroll={handleContentScroll}>
-          {showHistory ? (
-            <ExecutionHistoryPanel history={executionHistory} allTasks={tasks} />
-          ) : (
             <>
               {mdxError && (
                 <div style={{ color: 'var(--vscode-errorForeground)', padding: '20px' }}>
@@ -680,39 +540,43 @@ function App() {
               {isCompiling && <div style={{ padding: '20px' }}>Compiling MDX...</div>}
               {!mdxError && !isCompiling && MdxModule && <MdxModule />}
             </>
-          )}
         </div>
         <RunningTasksPanel
           runningTasks={runningTasks}
           allTasks={tasks}
-          onStop={handleStopTask}
-          onFocus={handleFocusTerminal}
-          onOpenDefinition={handleOpenDefinition}
-          onDismiss={handleDismissTask}
+          onStop={onStop}
+          onFocus={onFocus}
+          onOpenDefinition={onOpenDefinition}
+          onDismiss={onDismissTask}
           onShowLogs={handleShowLogs}
           onRequestLogBuffer={handleRequestLogBuffer}
           logBuffer={logBuffer}
           isCollapsed={runningTasksCollapsed}
-          onToggleCollapsed={handleToggleRunningTasksCollapsed}
+          onToggleCollapsed={onToggleRunningTasksCollapsed}
         />
         <RecentTasksList 
           tasks={recentlyUsedTasks}
           allTasks={tasks}
-          onRun={handleRunTask}
-          onToggleStar={handleToggleStar}
+          onRun={onRun}
+          onToggleStar={onToggleStar}
           starredTasks={starredTasks}
         />
         <StarredTasksList 
           tasks={starredTasks}
           allTasks={tasks}
-          onRun={handleRunTask}
-          onToggleStar={handleToggleStar}
+          onRun={onRun}
+          onToggleStar={onToggleStar}
           isCollapsed={starredTasksCollapsed}
-          onToggleCollapsed={handleToggleStarredTasksCollapsed}
+          onToggleCollapsed={onToggleStarredTasksCollapsed}
         />
       </div>
-    </TaskStateContext.Provider>
   );
 }
 
-export default App;
+export default function App() {
+  return (
+    <TaskStateProvider>
+      <ControlPanel />
+    </TaskStateProvider>
+  );
+}

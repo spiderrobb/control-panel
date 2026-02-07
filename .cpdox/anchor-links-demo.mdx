@@ -1,0 +1,161 @@
+# Anchor Links Demo
+
+Welcome to the **Anchor Links** demonstration! This document showcases how internal navigation works in ControlPanel's MDX documentation.
+
+## 📋 Table of Contents
+
+Click any link below to jump to that section:
+
+- [Introduction](#introduction)
+- [Features](#features)
+- [How to Use](#how-to-use)
+- [Examples](#examples)
+- [Best Practices](#best-practices)
+- [Conclusion](#conclusion)
+
+---
+
+## Introduction
+
+Anchor links allow you to create **internal navigation** within your documentation. Instead of scrolling manually to find a section, users can click a link and jump directly to the content they need.
+
+This is especially useful for:
+- Long documentation pages
+- Quick reference guides
+- Tutorial navigation
+- API documentation
+
+Jump back to the [Table of Contents](#table-of-contents) at any time!
+
+---
+
+## Features
+
+The anchor link system in ControlPanel provides:
+
+1. **Automatic ID Generation** - Every heading gets a unique ID automatically
+2. **Smooth Scrolling** - Clicking a link smoothly scrolls to the target
+3. **Proper Positioning** - Headings are positioned with appropriate margins
+4. **Standard Markdown** - Uses familiar `[text](#anchor)` syntax
+
+Want to see more examples? Check out [Examples](#examples) below!
+
+---
+
+## How to Use
+
+### Step 1: Write Your Headings
+
+Simply write your headings as you normally would:
+
+```markdown
+## My Section Title
+```
+
+### Step 2: Create Links
+
+Reference the heading using a hash (`#`) and the slugified title:
+
+```markdown
+[My Section Title](#my-section-title)
+```
+
+### Step 3: Test It Out
+
+Click the link to verify it scrolls to the correct section!
+
+For more details, see the [Best Practices](#best-practices) section.
+
+---
+
+## Examples
+
+### Example 1: Simple Navigation
+
+Here's a simple example of jumping between sections:
+
+- Start here: [Go to Features](#features)
+- From Features: [Go to Introduction](#introduction)
+- Back again: [Return to Examples](#examples)
+
+### Example 2: Documentation Structure
+
+You might structure documentation like this:
+
+```markdown
+# API Reference
+
+## Quick Links
+- [Authentication](#authentication)
+- [Endpoints](#endpoints)
+- [Error Handling](#error-handling)
+
+## Authentication
+...
+
+## Endpoints
+...
+
+## Error Handling
+...
+```
+
+Try it yourself! Go to [Conclusion](#conclusion) to see the final example.
+
+---
+
+## Best Practices
+
+When creating anchor links, follow these guidelines:
+
+### ✅ Do's
+
+1. **Use descriptive headings** - Clear headings create clear anchors
+2. **Keep headings unique** - Avoid duplicate heading text in the same document
+3. **Test your links** - Click each link to verify it works
+4. **Use a table of contents** - Help users navigate long documents
+
+### ❌ Don'ts
+
+1. **Avoid special characters in headings** - Keep it simple with letters and numbers
+2. **Don't use duplicate headings** - Each heading should be unique
+3. **Don't forget the hash** - Links must start with `#`
+4. **Don't break the naming convention** - Follow the slug generation rules
+
+Want to jump somewhere? Try going back to [Features](#features) or [Introduction](#introduction).
+
+---
+
+## Conclusion
+
+Anchor links are a powerful tool for creating navigable documentation. They help users find information quickly and make your documentation more professional and user-friendly.
+
+### Key Takeaways
+
+- ✨ Anchor links work automatically in ControlPanel MDX files
+- 🎯 Use them to create tables of contents and cross-references
+- 🚀 Smooth scrolling provides a polished user experience
+- 📖 Follow best practices for the best results
+
+### Next Steps
+
+- Read the full documentation: [Anchor Links Guide](anchor-links.mdx)
+- See real examples in: [Testing Documentation](testing.mdx)
+- Try creating your own MDX file with anchor links!
+
+---
+
+### Quick Navigation Test
+
+Can you navigate this chain in order?
+
+1. [Jump to Introduction](#introduction) ➡️
+2. [Jump to Features](#features) ➡️
+3. [Jump to How to Use](#how-to-use) ➡️
+4. [Jump to Examples](#examples) ➡️
+5. [Jump to Best Practices](#best-practices) ➡️
+6. [Jump back to Table of Contents](#table-of-contents) 🎯
+
+---
+
+*This demo file showcases the anchor link functionality in ControlPanel. Try clicking the links above to see it in action!*

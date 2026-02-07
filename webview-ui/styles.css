@@ -82,6 +82,7 @@ body {
   overflow-y: auto;
   padding: 16px;
   line-height: 1.6;
+  scroll-behavior: smooth;
 }
 
 /* Markdown Styles */
@@ -92,6 +93,7 @@ body {
   margin-bottom: 16px;
   border-bottom: 1px solid var(--vscode-panel-border);
   padding-bottom: 8px;
+  scroll-margin-top: 20px;
 }
 
 .content h2 {
@@ -99,6 +101,7 @@ body {
   font-weight: 600;
   margin-top: 24px;
   margin-bottom: 12px;
+  scroll-margin-top: 20px;
 }
 
 .content h3 {
@@ -106,6 +109,13 @@ body {
   font-weight: 600;
   margin-top: 16px;
   margin-bottom: 8px;
+  scroll-margin-top: 20px;
+}
+
+.content h4,
+.content h5,
+.content h6 {
+  scroll-margin-top: 20px;
 }
 
 .content p {

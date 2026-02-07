@@ -1,0 +1,223 @@
+# Anchor Link Support in MDX Documentation
+
+## Overview
+
+The ControlPanel extension now supports **anchor links** in MDX documentation, allowing users to create table of contents and jump to specific sections within a document.
+
+## How It Works
+
+### Automatic Heading IDs
+
+All headings (`h1` through `h6`) automatically receive ID attributes based on their text content:
+
+```mdx
+# Test Overview
+<!-- Generates: <h1 id="test-overview">Test Overview</h1> -->
+
+## Running Tests
+<!-- Generates: <h2 id="running-tests">Running Tests</h2> -->
+
+### Developer Workflow  
+<!-- Generates: <h3 id="developer-workflow">Developer Workflow</h3> -->
+```
+
+### Slug Generation Rules
+
+Heading text is converted to IDs using these rules:
+- Convert to lowercase
+- Replace spaces and special characters with hyphens (`-`)
+- Remove leading and trailing hyphens
+- Keep only alphanumeric characters and hyphens
+
+**Examples:**
+- `"Test Overview"` → `test-overview`
+- `"Running Tests"` → `running-tests`
+- `"Developer Workflow"` → `developer-workflow`
+- `"Special!@#Characters"` → `special-characters`
+
+## Creating Anchor Links
+
+### Table of Contents
+
+Create a clickable table of contents at the top of your document:
+
+```mdx
+# Testing Documentation
+
+## 📋 Quick Navigation
+
+- [Test Overview](#test-overview)
+- [Running Tests](#running-tests)
+- [Test Categories](#test-categories) 
+- [Developer Workflow](#developer-workflow)
+- [Debugging Tests](#debugging-tests)
+- [Bug Reports](#bug-reports)
+
+## Test Overview
+
+Content here...
+
+## Running Tests
+
+Content here...
+```
+
+### Jump Links
+
+Link to specific sections from anywhere in the document:
+
+```mdx
+For more details, see the [Developer Workflow](#developer-workflow) section.
+
+Check out the [Bug Reports](#bug-reports) for known issues.
+```
+
+## User Experience
+
+### Smooth Scrolling
+
+Clicking an anchor link will:
+1. Smoothly scroll to the target heading
+2. Position the heading 20px from the top (scroll margin)
+3. Maintain the breadcrumb visibility
+
+### Visual Feedback
+
+The scroll behavior uses CSS `scroll-behavior: smooth` for a polished user experience.
+
+## Implementation Details
+
+### Components Modified
+
+1. **App.jsx** - Added custom heading components (h1-h6) with ID generation
+2. **App.jsx** - Added anchor link click handler to scroll to target
+3. **styles.css** - Added `scroll-behavior: smooth` and `scroll-margin-top`
+
+### Code Example
+
+The implementation uses React components to intercept MDX heading rendering:
+
+```jsx
+h1: (props) => {
+  const id = generateHeadingId(props.children);
+  return <h1 id={id} {...props} />;
+}
+```
+
+And custom link handlers for anchor navigation:
+
+```jsx
+a: (props) => {
+  if (props.href?.startsWith('#')) {
+    return (
+      <a {...props} onClick={(e) => {
+        e.preventDefault();
+        const targetId = props.href.slice(1);
+        const targetElement = document.getElementById(targetId);
+        if (targetElement && contentRef.current) {
+          // Smooth scroll to target
+          contentRef.current.scrollTo({
+            top: elementTop - contentTop - 16,
+            behavior: 'smooth'
+          });
+        }
+      }} />
+    );
+  }
+  // ... other link types
+}
+```
+
+## Best Practices
+
+### 1. Use Descriptive Headings
+
+Headings should be clear and descriptive since they form the anchor IDs:
+
+```mdx
+✅ Good: ## Running Integration Tests
+❌ Avoid: ## Tests
+```
+
+### 2. Avoid Special Characters in Headings
+
+While special characters are handled, simple headings work best:
+
+```mdx
+✅ Good: ## Developer Workflow
+⚠️ Okay: ## Developer's Workflow (becomes developer-s-workflow)
+```
+
+### 3. Keep Headings Unique
+
+Each heading in a document should be unique to avoid ID conflicts:
+
+```mdx
+✅ Good:
+## Running Unit Tests
+## Running Integration Tests
+
+❌ Avoid:
+## Running Tests
+## Running Tests (duplicate ID!)
+```
+
+### 4. Test Your Links
+
+After creating anchor links, test them to ensure they scroll to the correct section.
+
+## Testing
+
+The anchor link functionality is tested in [App.test.js](../webview-ui/App.test.js):
+
+```javascript
+test('generateHeadingId creates proper slugs', () => {
+  expect(generateHeadingId('Test Overview')).toBe('test-overview');
+  expect(generateHeadingId('Running Tests')).toBe('running-tests');
+  // ... more test cases
+});
+```
+
+## Troubleshooting
+
+### Link Doesn't Scroll
+
+**Problem:** Clicking an anchor link doesn't scroll to the target.
+
+**Solutions:**
+1. Verify the target heading exists in the document
+2. Check that the anchor link matches the generated ID:
+   - Heading: `## Test Overview`
+   - Link: `[Test Overview](#test-overview)`
+3. Ensure the heading and link are in the same document
+
+### Scroll Position Is Off
+
+**Problem:** The heading scrolls into view but is partially hidden.
+
+**Solution:** The scroll margin is set to 20px. This is defined in styles.css and can be adjusted if needed.
+
+### Hash in URL
+
+**Problem:** You want to link to a specific section from outside the extension.
+
+**Note:** The current implementation supports hash navigation within the webview. Hash support from external URLs would require additional implementation in the extension provider.
+
+## Future Enhancements
+
+Potential improvements for anchor link support:
+
+1. **Copy Link to Section** - Add a button next to headings to copy the anchor link
+2. **Highlight on Scroll** - Highlight the current section in the table of contents
+3. **Deep Linking** - Support opening the extension to a specific section via URL
+4. **Heading Permalinks** - Show a link icon on hover for easy copying
+
+## Related Documentation
+
+- [Testing Documentation](/.cpdox/testing.mdx) - Example using anchor links
+- [MDX Documentation](https://mdxjs.com/) - Official MDX documentation
+- [VS Code Webview API](https://code.visualstudio.com/api/extension-guides/webview) - Webview implementation details
+
+---
+
+*Last Updated: February 7, 2026*

@@ -1,0 +1,24 @@
+// Jest Snapshot v1, https://goo.gl/fbAQLP
+
+exports[`ExecutionHistoryPanel Rendering matches snapshot with execution history 1`] = `
+<div>
+  <div
+    class="execution-history-empty"
+  >
+    <div
+      class="empty-state"
+    >
+      <p
+        class="empty-title"
+      >
+        No task executions recorded
+      </p>
+      <p
+        class="empty-message"
+      >
+        Task execution history will appear here as you run tasks from the Control Panel.
+      </p>
+    </div>
+  </div>
+</div>
+`;

@@ -119,6 +119,13 @@ class MdxWebviewProvider {
     }
     
     await this._context.workspaceState.update('executionHistory', history);
+    
+    // Notify webview
+    this._view?.webview.postMessage({
+      type: 'executionHistory',
+      history
+    });
+
     return history;
   }
 
@@ -702,6 +709,52 @@ class MdxWebviewProvider {
       // No prefix for npm tasks anymore - chips will handle visual distinction
       const displayLabel = task.name;
       const taskId = this.getTaskId(task);
+
+      // Extract command info from execution if not in definition
+      let definition = task.definition;
+      
+      // We can inspect task.execution for shell/process tasks to get the actual command
+      if (task.execution) {
+        // Create a shallow copy to safely mutate for the message
+        definition = { ...task.definition };
+        
+        // Only attempt to populate if missing both command and script
+        if (!definition.command && !definition.script) {
+          try {
+             const exec = task.execution;
+             // Handle ShellExecution
+             if (exec.commandLine) {
+               definition.command = exec.commandLine;
+             } else if (exec.command) { 
+               // ShellExecution with args
+               let cmd = (typeof exec.command === 'string') ? exec.command : exec.command.value;
+               if (exec.args && exec.args.length > 0) {
+                 // args can be strings or ShellQuotedString
+                 const formattedArgs = exec.args.map(a => {
+                   if (typeof a === 'string') return a;
+                   return a.value; // Handle ShellQuotedString
+                 }).join(' ');
+                 cmd += ` ${formattedArgs}`;
+               }
+               definition.command = cmd;
+             } else if (exec.process) { 
+                 // Handle ProcessExecution
+                 let cmd = exec.process;
+                 if (exec.args && exec.args.length > 0) {
+                   const formattedArgs = exec.args.map(a => {
+                     if (typeof a === 'string') return a;
+                     return a.value;
+                   }).join(' ');
+                   cmd += ` ${formattedArgs}`;
+                 }
+                 definition.command = cmd;
+             }
+          } catch (e) {
+            this._logger.warn(`Failed to extract execution info for task ${task.name}:`, e);
+          }
+        }
+      }
+
       return {
         id: taskId,
         // 'label' field is set to task.name - kept for legacy lookup
@@ -709,7 +762,7 @@ class MdxWebviewProvider {
         displayLabel: displayLabel,
         detail: task.detail || '',
         source: task.source,
-        definition: task.definition, // Include definition for script names and paths
+        definition: definition, // Include definition for script names and paths
         dependsOn: dependencyInfo.dependsOn, // Note: these are currently names, not IDs
         dependsOrder: dependencyInfo.dependsOrder
       };
