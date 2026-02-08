@@ -1,179 +1,149 @@
 import React from 'react';
-import { renderWithTheme, screen, userEvent } from '../test-utils';
+import { render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { ThemeProvider, createTheme } from '@mui/material/styles';
 import StarredTasksList from './StarredTasksList';
-import { TaskStateProvider } from '../context';
 import { sampleTasks } from '../../test/fixtures/tasks';
 
-const mockVscodeApi = {
-  postMessage: jest.fn()
-};
+const testTheme = createTheme({ palette: { mode: 'dark' } });
 
-global.acquireVsCodeApi = () => mockVscodeApi;
+// Use the global mock from test-setup.js (set before module load)
+const mockVscodeApi = global.__mockVscodeApi;
+
+function renderStarredTasks(props = {}) {
+  const defaultProps = {
+    tasks: [],
+    allTasks: sampleTasks,
+    onRun: jest.fn(),
+    onToggleStar: jest.fn(),
+    isCollapsed: false,
+    onToggleCollapsed: jest.fn()
+  };
+
+  return render(
+    <ThemeProvider theme={testTheme}>
+      <StarredTasksList {...defaultProps} {...props} />
+    </ThemeProvider>
+  );
+}
 
 describe('StarredTasksList', () => {
   beforeEach(() => {
     jest.clearAllMocks();
   });
 
+  // ─── Rendering ──────────────────────────────────────────────
+
   describe('Rendering', () => {
-    test('renders empty state when no starred tasks', () => {
-      renderWithTheme(
-        <TaskStateProvider>
-          <StarredTasksList
-            starredTasks={[]}
-            allTasks={sampleTasks}
-            onRun={jest.fn()}
-            onToggleStar={jest.fn()}
-            expanded={true}
-            onToggleExpanded={jest.fn()}
-          />
-        </TaskStateProvider>
-      );
+    test('empty state: no starred tasks', () => {
+      renderStarredTasks({ tasks: [] });
 
-      expect(screen.getByText(/starred/i)).toBeInTheDocument();
-      expect(screen.queryByRole('button', { name: /run/i })).not.toBeInTheDocument();
+      expect(screen.getByText(/Starred Tasks \(0\/20\)/)).toBeInTheDocument();
+      expect(screen.getByText(/no starred tasks yet/i)).toBeInTheDocument();
     });
 
-    test('renders starred tasks list', () => {
-      renderWithTheme(
-        <TaskStateProvider>
-          <StarredTasksList
-            starredTasks={['npm: test', 'npm: build']}
-            allTasks={sampleTasks}
-            onRun={jest.fn()}
-            onToggleStar={jest.fn()}
-            expanded={true}
-            onToggleExpanded={jest.fn()}
-          />
-        </TaskStateProvider>
-      );
+    test('displays starred tasks list', () => {
+      renderStarredTasks({ tasks: ['test', 'build'] });
 
-      expect(screen.getByText(/test/i)).toBeInTheDocument();
-      expect(screen.getByText(/build/i)).toBeInTheDocument();
+      expect(screen.getByText('test')).toBeInTheDocument();
+      expect(screen.getByText('build')).toBeInTheDocument();
     });
 
-    test('matches snapshot with starred tasks', () => {
-      const { container } = renderWithTheme(
-        <TaskStateProvider>
-          <StarredTasksList
-            starredTasks={['npm: test', 'npm: build']}
-            allTasks={sampleTasks}
-            onRun={jest.fn()}
-            onToggleStar={jest.fn()}
-            expanded={true}
-            onToggleExpanded={jest.fn()}
-          />
-        </TaskStateProvider>
-      );
+    test('shows filled star icons for starred tasks', () => {
+      renderStarredTasks({ tasks: ['test', 'build'] });
+
+      const starIcons = screen.getAllByTestId('StarIcon');
+      expect(starIcons.length).toBe(2);
+    });
+
+    test('shows count with max in header', () => {
+      renderStarredTasks({ tasks: ['test', 'build'] });
+
+      expect(screen.getByText(/Starred Tasks \(2\/20\)/)).toBeInTheDocument();
+    });
+
+    test('shows displayLabel from allTasks when available', () => {
+      const allTasks = [
+        { id: 'myid', label: 'test', displayLabel: 'Run Tests', source: 'Workspace', definition: {} }
+      ];
+
+      renderStarredTasks({ tasks: ['myid'], allTasks });
+
+      expect(screen.getByText('Run Tests')).toBeInTheDocument();
+    });
+
+    test('snapshot: panel with starred tasks', () => {
+      const { container } = renderStarredTasks({ tasks: ['test', 'build'] });
 
       expect(container).toMatchSnapshot();
     });
   });
 
+  // ─── User Interactions ──────────────────────────────────────
+
   describe('User Interactions', () => {
-    test('calls onRun when play button clicked', async () => {
+    test('click play button → runs task', async () => {
       const user = userEvent.setup({ delay: null });
       const onRun = jest.fn();
 
-      renderWithTheme(
-        <TaskStateProvider>
-          <StarredTasksList
-            starredTasks={['npm: test']}
-            allTasks={sampleTasks}
-            onRun={onRun}
-            onToggleStar={jest.fn()}
-            expanded={true}
-            onToggleExpanded={jest.fn()}
-          />
-        </TaskStateProvider>
-      );
+      renderStarredTasks({ tasks: ['test'], onRun });
 
-      const playButton = screen.getByRole('button', { name: /run/i });
-      await user.click(playButton);
+      const playIcon = screen.getByTestId('PlayArrowIcon');
+      await user.click(playIcon.closest('button'));
 
-      expect(onRun).toHaveBeenCalledWith('npm: test');
+      expect(onRun).toHaveBeenCalledWith('test');
     });
 
-    test('calls onToggleStar when star button clicked', async () => {
+    test('click star button → unstars task', async () => {
       const user = userEvent.setup({ delay: null });
       const onToggleStar = jest.fn();
 
-      renderWithTheme(
-        <TaskStateProvider>
-          <StarredTasksList
-            starredTasks={['npm: test']}
-            allTasks={sampleTasks}
-            onRun={jest.fn()}
-            onToggleStar={onToggleStar}
-            expanded={true}
-            onToggleExpanded={jest.fn()}
-          />
-        </TaskStateProvider>
-      );
+      renderStarredTasks({ tasks: ['test'], onToggleStar });
 
-      const starButton = screen.getByRole('button', { name: /unstar/i });
-      await user.click(starButton);
+      const starIcon = screen.getByTestId('StarIcon');
+      await user.click(starIcon.closest('button'));
 
-      expect(onToggleStar).toHaveBeenCalledWith('npm: test');
+      expect(onToggleStar).toHaveBeenCalledWith('test');
     });
 
-    test('calls onToggleExpanded when collapse button clicked', async () => {
+    test('toggle collapse/expand (persisted via context)', async () => {
       const user = userEvent.setup({ delay: null });
-      const onToggleExpanded = jest.fn();
+      const onToggleCollapsed = jest.fn();
 
-      renderWithTheme(
-        <TaskStateProvider>
-          <StarredTasksList
-            starredTasks={['npm: test']}
-            allTasks={sampleTasks}
-            onRun={jest.fn()}
-            onToggleStar={jest.fn()}
-            expanded={true}
-            onToggleExpanded={onToggleExpanded}
-          />
-        </TaskStateProvider>
-      );
+      renderStarredTasks({ tasks: ['test'], onToggleCollapsed });
 
-      const collapseButton = screen.getByRole('button', { name: /collapse/i });
-      await user.click(collapseButton);
+      const collapseIcon = screen.getByTestId('ExpandLessIcon');
+      await user.click(collapseIcon.closest('button'));
 
-      expect(onToggleExpanded).toHaveBeenCalled();
+      expect(onToggleCollapsed).toHaveBeenCalled();
     });
   });
 
-  describe('Expanded State Persistence', () => {
-    test('hides content when collapsed', () => {
-      renderWithTheme(
-        <TaskStateProvider>
-          <StarredTasksList
-            starredTasks={['npm: test']}
-            allTasks={sampleTasks}
-            onRun={jest.fn()}
-            onToggleStar={jest.fn()}
-            expanded={false}
-            onToggleExpanded={jest.fn()}
-          />
-        </TaskStateProvider>
-      );
+  // ─── State Persistence ─────────────────────────────────────
 
-      expect(screen.queryByText(/test/i)).not.toBeInTheDocument();
+  describe('State Persistence', () => {
+    test('hides content when collapsed', () => {
+      renderStarredTasks({ tasks: ['test'], isCollapsed: true });
+
+      expect(screen.queryByText('test')).not.toBeInTheDocument();
     });
 
-    test('shows content when expanded', () => {
-      renderWithTheme(
-        <TaskStateProvider>
-          <StarredTasksList
-            starredTasks={['npm: test']}
-            allTasks={sampleTasks}
-            onRun={jest.fn()}
-            onToggleStar={jest.fn()}
-            expanded={true}
-            onToggleExpanded={jest.fn()}
-          />
-        </TaskStateProvider>
-      );
+    test('shows content when not collapsed', () => {
+      renderStarredTasks({ tasks: ['test'], isCollapsed: false });
 
-      expect(screen.getByText(/test/i)).toBeInTheDocument();
+      expect(screen.getByText('test')).toBeInTheDocument();
+    });
+
+    test('shows expand icon when collapsed', () => {
+      renderStarredTasks({ tasks: ['test'], isCollapsed: true });
+
+      expect(screen.getByTestId('ExpandMoreIcon')).toBeInTheDocument();
+    });
+
+    test('shows collapse icon when expanded', () => {
+      renderStarredTasks({ tasks: ['test'], isCollapsed: false });
+
+      expect(screen.getByTestId('ExpandLessIcon')).toBeInTheDocument();
     });
   });
 });

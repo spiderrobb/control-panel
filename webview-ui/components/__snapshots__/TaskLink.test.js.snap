@@ -1,219 +1,322 @@
 // Jest Snapshot v1, https://goo.gl/fbAQLP
 
-exports[`TaskLink Component Dependency Visualization matches snapshot for task with dependencies 1`] = `<div />`;
-
-exports[`TaskLink Component Rendering matches snapshot for idle state 1`] = `
+exports[`TaskLink Component Dependency Visualization snapshot: task with dependencies 1`] = `
 <div>
   <span
-    aria-label="Task not found"
-    class="MuiBox-root css-bv69nn"
-    data-mui-internal-clone-element="true"
+    class="task-link"
   >
     <span
-      class="task-link"
+      class="task-expanded"
     >
       <span
-        class="task-expanded"
+        aria-label="Add to starred tasks"
+        class=""
+        data-mui-internal-clone-element="true"
+      >
+        <button
+          class="MuiButtonBase-root MuiIconButton-root MuiIconButton-sizeSmall css-1vt5ql0-MuiButtonBase-root-MuiIconButton-root"
+          tabindex="0"
+          type="button"
+        >
+          <svg
+            aria-hidden="true"
+            class="MuiSvgIcon-root MuiSvgIcon-fontSizeMedium css-6dq5bp-MuiSvgIcon-root"
+            data-testid="StarBorderIcon"
+            focusable="false"
+            viewBox="0 0 24 24"
+          >
+            <path
+              d="m22 9.24-7.19-.62L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21 12 17.27 18.18 21l-1.63-7.03zM12 15.4l-3.76 2.27 1-4.28-3.32-2.88 4.38-.38L12 6.1l1.71 4.04 4.38.38-3.32 2.88 1 4.28z"
+            />
+          </svg>
+        </button>
+      </span>
+      <div
+        class="task-segments task-segments-sequence"
       >
         <span
-          aria-label=""
-          class=""
-          data-mui-internal-clone-element="true"
+          class="task-segment segment-idle segment-parent "
+          style="--segment-progress: 0%;"
         >
-          <button
-            class="MuiButtonBase-root Mui-disabled MuiIconButton-root Mui-disabled MuiIconButton-sizeSmall css-1vt5ql0-MuiButtonBase-root-MuiIconButton-root"
-            disabled=""
-            tabindex="-1"
-            type="button"
-          >
-            <svg
-              aria-hidden="true"
-              class="MuiSvgIcon-root MuiSvgIcon-fontSizeMedium css-6dq5bp-MuiSvgIcon-root"
-              data-testid="StarBorderIcon"
-              focusable="false"
-              viewBox="0 0 24 24"
-            >
-              <path
-                d="m22 9.24-7.19-.62L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21 12 17.27 18.18 21l-1.63-7.03zM12 15.4l-3.76 2.27 1-4.28-3.32-2.88 4.38-.38L12 6.1l1.71 4.04 4.38.38-3.32 2.88 1 4.28z"
-              />
-            </svg>
-          </button>
+          deploy
+          <span
+            class="segment-timer "
+          />
         </span>
         <span
-          class="task-label"
+          class="task-segment segment-idle segment-child "
+          style="--segment-progress: 0%;"
         >
-          npm: test
+          test
+          <span
+            class="segment-timer "
+          />
         </span>
         <span
-          aria-label=""
-          class=""
-          data-mui-internal-clone-element="true"
+          class="task-segment segment-idle segment-child "
+          style="--segment-progress: 0%;"
         >
-          <button
-            class="MuiButtonBase-root Mui-disabled MuiIconButton-root Mui-disabled MuiIconButton-sizeSmall css-n72kyw-MuiButtonBase-root-MuiIconButton-root"
-            disabled=""
-            tabindex="-1"
-            type="button"
-          >
-            <svg
-              aria-hidden="true"
-              class="MuiSvgIcon-root MuiSvgIcon-fontSizeMedium css-6dq5bp-MuiSvgIcon-root"
-              data-testid="PlayArrowIcon"
-              focusable="false"
-              viewBox="0 0 24 24"
-            >
-              <path
-                d="M8 5v14l11-7z"
-              />
-            </svg>
-          </button>
+          build
+          <span
+            class="segment-timer "
+          />
         </span>
+      </div>
+      <span
+        aria-label="Run this task"
+        class=""
+        data-mui-internal-clone-element="true"
+      >
+        <button
+          class="MuiButtonBase-root MuiIconButton-root MuiIconButton-sizeSmall css-n72kyw-MuiButtonBase-root-MuiIconButton-root"
+          tabindex="0"
+          type="button"
+        >
+          <svg
+            aria-hidden="true"
+            class="MuiSvgIcon-root MuiSvgIcon-fontSizeMedium css-6dq5bp-MuiSvgIcon-root"
+            data-testid="PlayArrowIcon"
+            focusable="false"
+            viewBox="0 0 24 24"
+          >
+            <path
+              d="M8 5v14l11-7z"
+            />
+          </svg>
+        </button>
       </span>
     </span>
   </span>
 </div>
 `;
 
-exports[`TaskLink Component Task States matches snapshot for failed state 1`] = `
+exports[`TaskLink Component Rendering snapshot: idle state 1`] = `
 <div>
   <span
-    aria-label="Task not found"
-    class="MuiBox-root css-bv69nn"
-    data-mui-internal-clone-element="true"
+    class="task-link"
   >
     <span
-      class="task-link"
+      class="task-expanded"
     >
       <span
-        class="task-expanded"
+        aria-label="Add to starred tasks"
+        class=""
+        data-mui-internal-clone-element="true"
       >
-        <span
-          aria-label=""
-          class=""
-          data-mui-internal-clone-element="true"
+        <button
+          class="MuiButtonBase-root MuiIconButton-root MuiIconButton-sizeSmall css-1vt5ql0-MuiButtonBase-root-MuiIconButton-root"
+          tabindex="0"
+          type="button"
         >
-          <button
-            class="MuiButtonBase-root Mui-disabled MuiIconButton-root Mui-disabled MuiIconButton-sizeSmall css-1vt5ql0-MuiButtonBase-root-MuiIconButton-root"
-            disabled=""
-            tabindex="-1"
-            type="button"
+          <svg
+            aria-hidden="true"
+            class="MuiSvgIcon-root MuiSvgIcon-fontSizeMedium css-6dq5bp-MuiSvgIcon-root"
+            data-testid="StarBorderIcon"
+            focusable="false"
+            viewBox="0 0 24 24"
           >
-            <svg
-              aria-hidden="true"
-              class="MuiSvgIcon-root MuiSvgIcon-fontSizeMedium css-6dq5bp-MuiSvgIcon-root"
-              data-testid="StarBorderIcon"
-              focusable="false"
-              viewBox="0 0 24 24"
-            >
-              <path
-                d="m22 9.24-7.19-.62L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21 12 17.27 18.18 21l-1.63-7.03zM12 15.4l-3.76 2.27 1-4.28-3.32-2.88 4.38-.38L12 6.1l1.71 4.04 4.38.38-3.32 2.88 1 4.28z"
-              />
-            </svg>
-          </button>
-        </span>
-        <span
-          class="task-label"
+            <path
+              d="m22 9.24-7.19-.62L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21 12 17.27 18.18 21l-1.63-7.03zM12 15.4l-3.76 2.27 1-4.28-3.32-2.88 4.38-.38L12 6.1l1.71 4.04 4.38.38-3.32 2.88 1 4.28z"
+            />
+          </svg>
+        </button>
+      </span>
+      <span
+        class="task-label"
+        title="Double-click to open task definition in tasks.json"
+      >
+        test
+      </span>
+      <span
+        aria-label="Run this task"
+        class=""
+        data-mui-internal-clone-element="true"
+      >
+        <button
+          class="MuiButtonBase-root MuiIconButton-root MuiIconButton-sizeSmall css-n72kyw-MuiButtonBase-root-MuiIconButton-root"
+          tabindex="0"
+          type="button"
         >
-          npm: test
-        </span>
-        <span
-          aria-label=""
-          class=""
-          data-mui-internal-clone-element="true"
-        >
-          <button
-            class="MuiButtonBase-root Mui-disabled MuiIconButton-root Mui-disabled MuiIconButton-sizeSmall css-n72kyw-MuiButtonBase-root-MuiIconButton-root"
-            disabled=""
-            tabindex="-1"
-            type="button"
+          <svg
+            aria-hidden="true"
+            class="MuiSvgIcon-root MuiSvgIcon-fontSizeMedium css-6dq5bp-MuiSvgIcon-root"
+            data-testid="PlayArrowIcon"
+            focusable="false"
+            viewBox="0 0 24 24"
           >
-            <svg
-              aria-hidden="true"
-              class="MuiSvgIcon-root MuiSvgIcon-fontSizeMedium css-6dq5bp-MuiSvgIcon-root"
-              data-testid="PlayArrowIcon"
-              focusable="false"
-              viewBox="0 0 24 24"
-            >
-              <path
-                d="M8 5v14l11-7z"
-              />
-            </svg>
-          </button>
-        </span>
+            <path
+              d="M8 5v14l11-7z"
+            />
+          </svg>
+        </button>
       </span>
     </span>
   </span>
 </div>
 `;
 
-exports[`TaskLink Component Task States matches snapshot for running state 1`] = `
+exports[`TaskLink Component Task States snapshot: failed state 1`] = `
 <div>
-  <span
-    aria-label="Task not found"
-    class="MuiBox-root css-bv69nn"
-    data-mui-internal-clone-element="true"
+  <div
+    class="task-link running "
   >
-    <span
-      class="task-link"
+    <div
+      class="task-pill error"
     >
       <span
-        class="task-expanded"
+        aria-label="Add to starred tasks"
+        class=""
+        data-mui-internal-clone-element="true"
       >
-        <span
-          aria-label=""
-          class=""
-          data-mui-internal-clone-element="true"
+        <button
+          class="MuiButtonBase-root MuiIconButton-root MuiIconButton-sizeSmall css-1vt5ql0-MuiButtonBase-root-MuiIconButton-root"
+          tabindex="0"
+          type="button"
         >
-          <button
-            class="MuiButtonBase-root Mui-disabled MuiIconButton-root Mui-disabled MuiIconButton-sizeSmall css-1vt5ql0-MuiButtonBase-root-MuiIconButton-root"
-            disabled=""
-            tabindex="-1"
-            type="button"
+          <svg
+            aria-hidden="true"
+            class="MuiSvgIcon-root MuiSvgIcon-fontSizeMedium css-6dq5bp-MuiSvgIcon-root"
+            data-testid="StarBorderIcon"
+            focusable="false"
+            viewBox="0 0 24 24"
           >
-            <svg
-              aria-hidden="true"
-              class="MuiSvgIcon-root MuiSvgIcon-fontSizeMedium css-6dq5bp-MuiSvgIcon-root"
-              data-testid="StarBorderIcon"
-              focusable="false"
-              viewBox="0 0 24 24"
-            >
-              <path
-                d="m22 9.24-7.19-.62L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21 12 17.27 18.18 21l-1.63-7.03zM12 15.4l-3.76 2.27 1-4.28-3.32-2.88 4.38-.38L12 6.1l1.71 4.04 4.38.38-3.32 2.88 1 4.28z"
-              />
-            </svg>
-          </button>
-        </span>
-        <span
-          class="task-label"
-        >
-          npm: test
-        </span>
-        <span
-          aria-label=""
-          class=""
-          data-mui-internal-clone-element="true"
-        >
-          <button
-            class="MuiButtonBase-root Mui-disabled MuiIconButton-root Mui-disabled MuiIconButton-sizeSmall css-n72kyw-MuiButtonBase-root-MuiIconButton-root"
-            disabled=""
-            tabindex="-1"
-            type="button"
-          >
-            <svg
-              aria-hidden="true"
-              class="MuiSvgIcon-root MuiSvgIcon-fontSizeMedium css-6dq5bp-MuiSvgIcon-root"
-              data-testid="PlayArrowIcon"
-              focusable="false"
-              viewBox="0 0 24 24"
-            >
-              <path
-                d="M8 5v14l11-7z"
-              />
-            </svg>
-          </button>
-        </span>
+            <path
+              d="m22 9.24-7.19-.62L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21 12 17.27 18.18 21l-1.63-7.03zM12 15.4l-3.76 2.27 1-4.28-3.32-2.88 4.38-.38L12 6.1l1.71 4.04 4.38.38-3.32 2.88 1 4.28z"
+            />
+          </svg>
+        </button>
       </span>
-    </span>
-  </span>
+      <span
+        class="task-label"
+        title="Double-click to open task definition in tasks.json"
+      >
+        test
+      </span>
+      <span
+        class="error-badge"
+        title="Error"
+      >
+        Failed 
+        (1)
+      </span>
+      <span
+        aria-label="Retry this task"
+        class=""
+        data-mui-internal-clone-element="true"
+      >
+        <button
+          class="MuiButtonBase-root MuiIconButton-root MuiIconButton-sizeSmall css-n72kyw-MuiButtonBase-root-MuiIconButton-root"
+          tabindex="0"
+          type="button"
+        >
+          <svg
+            aria-hidden="true"
+            class="MuiSvgIcon-root MuiSvgIcon-fontSizeMedium css-6dq5bp-MuiSvgIcon-root"
+            data-testid="PlayArrowIcon"
+            focusable="false"
+            viewBox="0 0 24 24"
+          >
+            <path
+              d="M8 5v14l11-7z"
+            />
+          </svg>
+        </button>
+      </span>
+    </div>
+  </div>
+</div>
+`;
+
+exports[`TaskLink Component Task States snapshot: running state 1`] = `
+<div>
+  <div
+    class="task-link running "
+  >
+    <div
+      class="task-pill bg-shimmer"
+    >
+      <span
+        aria-label="Add to starred tasks"
+        class=""
+        data-mui-internal-clone-element="true"
+      >
+        <button
+          class="MuiButtonBase-root MuiIconButton-root MuiIconButton-sizeSmall css-1vt5ql0-MuiButtonBase-root-MuiIconButton-root"
+          tabindex="0"
+          type="button"
+        >
+          <svg
+            aria-hidden="true"
+            class="MuiSvgIcon-root MuiSvgIcon-fontSizeMedium css-6dq5bp-MuiSvgIcon-root"
+            data-testid="StarBorderIcon"
+            focusable="false"
+            viewBox="0 0 24 24"
+          >
+            <path
+              d="m22 9.24-7.19-.62L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21 12 17.27 18.18 21l-1.63-7.03zM12 15.4l-3.76 2.27 1-4.28-3.32-2.88 4.38-.38L12 6.1l1.71 4.04 4.38.38-3.32 2.88 1 4.28z"
+            />
+          </svg>
+        </button>
+      </span>
+      <span
+        class="task-label"
+        title="Double-click to open task definition in tasks.json"
+      >
+        test
+      </span>
+      <span
+        class="runtime"
+        title="Running for 0s"
+      >
+        0s
+      </span>
+      <span
+        aria-label="Show terminal output for this task"
+        class=""
+        data-mui-internal-clone-element="true"
+      >
+        <button
+          class="MuiButtonBase-root MuiIconButton-root MuiIconButton-sizeSmall css-n72kyw-MuiButtonBase-root-MuiIconButton-root"
+          tabindex="0"
+          type="button"
+        >
+          <svg
+            aria-hidden="true"
+            class="MuiSvgIcon-root MuiSvgIcon-fontSizeMedium css-6dq5bp-MuiSvgIcon-root"
+            data-testid="BoltIcon"
+            focusable="false"
+            viewBox="0 0 24 24"
+          >
+            <path
+              d="M11 21h-1l1-7H7.5c-.58 0-.57-.32-.38-.66s.05-.08.07-.12C8.48 10.94 10.42 7.54 13 3h1l-1 7h3.5c.49 0 .56.33.47.51l-.07.15C12.96 17.55 11 21 11 21"
+            />
+          </svg>
+        </button>
+      </span>
+      <span
+        aria-label="Stop this task"
+        class=""
+        data-mui-internal-clone-element="true"
+      >
+        <button
+          class="MuiButtonBase-root MuiIconButton-root MuiIconButton-sizeSmall css-1wjptj6-MuiButtonBase-root-MuiIconButton-root"
+          tabindex="0"
+          type="button"
+        >
+          <svg
+            aria-hidden="true"
+            class="MuiSvgIcon-root MuiSvgIcon-fontSizeMedium css-6dq5bp-MuiSvgIcon-root"
+            data-testid="StopIcon"
+            focusable="false"
+            viewBox="0 0 24 24"
+          >
+            <path
+              d="M6 6h12v12H6z"
+            />
+          </svg>
+        </button>
+      </span>
+    </div>
+  </div>
 </div>
 `;

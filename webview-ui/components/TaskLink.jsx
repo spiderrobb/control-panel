@@ -15,6 +15,8 @@ import PauseIcon from '@mui/icons-material/Pause';
 import { useTaskState } from '../context';
 
 // Define 10 VS Code theme colors for npm path color-coding
+// Charts: blue, green, orange, purple, yellow, red (official chart colors)
+// Terminal ANSI: cyan, magenta, bright blue, bright magenta (for additional variety)
 const NPM_CHIP_COLORS = [
   'var(--vscode-charts-blue)',
   'var(--vscode-charts-green)',
@@ -22,10 +24,10 @@ const NPM_CHIP_COLORS = [
   'var(--vscode-charts-purple)',
   'var(--vscode-charts-yellow)',
   'var(--vscode-charts-red)',
-  'var(--vscode-charts-cyan)',
-  'var(--vscode-charts-pink)',
+  'var(--vscode-terminal-ansiCyan)',
   'var(--vscode-terminal-ansiMagenta)',
-  'var(--vscode-terminal-ansiBrightBlue)'
+  'var(--vscode-terminal-ansiBrightBlue)',
+  'var(--vscode-terminal-ansiBrightMagenta)'
 ];
 
 // Normalize npm path for consistent color assignment
@@ -44,8 +46,6 @@ function TaskLink({ label, taskId, displayLabel, disabled = false }) {
       onOpenDefinition,
       starredTasks,
       onToggleStar,
-      npmPathColorMap,
-      setNpmPathColorMap,
       taskHistoryMap
   } = useTaskState();
 
@@ -59,19 +59,15 @@ function TaskLink({ label, taskId, displayLabel, disabled = false }) {
   let currentTask = taskId ? tasks.find(t => t.id === taskId) : null;
   
   // Fallback to label lookup if ID not found or not provided
-  if (!currentTask && tasks.length > 0) {
-      if (taskId) {
-        currentTask = tasks.find(t => t.id === taskId);
-      } else if (label) {
-        const matching = tasks.filter(t => t.label === label);
-        currentTask = matching.find(t => t.source === 'Workspace') || matching[0];
-        
-        // Handle "npm: " prefix for legacy MDX support
-        if (!currentTask && label.startsWith('npm: ')) {
-          const scriptName = label.substring(5);
-          currentTask = tasks.find(t => t.source === 'npm' && t.label === scriptName);
-        }
-      }
+  if (!currentTask && tasks.length > 0 && label) {
+    const matching = tasks.filter(t => t.label === label);
+    currentTask = matching.find(t => t.source === 'Workspace') || matching[0];
+    
+    // Handle "npm: " prefix for legacy MDX support
+    if (!currentTask && label.startsWith('npm: ')) {
+      const scriptName = label.substring(5);
+      currentTask = tasks.find(t => t.source === 'npm' && t.label === scriptName);
+    }
   }
     
   // Detect if task definition is missing
@@ -86,30 +82,10 @@ function TaskLink({ label, taskId, displayLabel, disabled = false }) {
   // For npm tasks, use script name from definition, otherwise use displayLabel/label
   const displayText = isNpmTask && scriptName ? scriptName : (displayLabel || resolvedLabel);
   
-  // Get or assign color for npm path
+  // Get deterministic color for npm path via stable hash
   const getNpmColor = (path) => {
     if (!path) return NPM_CHIP_COLORS[0];
     const normalized = normalizePath(path);
-    
-    if (npmPathColorMap && npmPathColorMap[normalized]) {
-      return npmPathColorMap[normalized];
-    }
-    
-    // Assign new color
-    if (setNpmPathColorMap) {
-      const assignedColors = Object.values(npmPathColorMap || {});
-      const nextColorIndex = assignedColors.length % NPM_CHIP_COLORS.length;
-      const newColor = NPM_CHIP_COLORS[nextColorIndex];
-      // Note: We avoid setting state in render, ideally this should be done in an effect or event
-      // For now, we return default if not set, and rely on app consistent hashing if simpler
-      // But preserving original behavior:
-      // setNpmPathColorMap is called here in original code, which is risky for render loops
-      // but if cached, it returns immediately.
-      // We will skip calling set state here to avoid loops in this refactor and just pick based on hash or index
-      // But assuming the context provides the map.
-    }
-    
-    // Simple deterministic color if not in map
     let hash = 0;
     for (let i = 0; i < normalized.length; i++) {
         hash = normalized.charCodeAt(i) + ((hash << 5) - hash);
@@ -433,7 +409,7 @@ function TaskLink({ label, taskId, displayLabel, disabled = false }) {
   const renderSequentialSegments = () => (
     <div className="task-segments task-segments-sequence">
       {renderSegment(label, parentDependencyState, true)}
-      {dependencySegments.map(dep => renderSegment(dep, getSegmentStateWithParent(dep)))}
+      {[...dependencySegments].reverse().map(dep => renderSegment(dep, getSegmentStateWithParent(dep)))}
     </div>
   );
 

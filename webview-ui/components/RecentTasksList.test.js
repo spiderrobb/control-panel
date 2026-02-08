@@ -1,139 +1,127 @@
 import React from 'react';
-import { renderWithTheme, screen, userEvent } from '../test-utils';
+import { render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { ThemeProvider, createTheme } from '@mui/material/styles';
 import RecentTasksList from './RecentTasksList';
-import { TaskStateProvider } from '../context';
 import { sampleTasks } from '../../test/fixtures/tasks';
 
-const mockVscodeApi = {
-  postMessage: jest.fn()
-};
+const testTheme = createTheme({ palette: { mode: 'dark' } });
 
-global.acquireVsCodeApi = () => mockVscodeApi;
+function renderRecentTasks(props = {}) {
+  const defaultProps = {
+    tasks: [],
+    allTasks: sampleTasks,
+    onRun: jest.fn(),
+    onToggleStar: jest.fn(),
+    starredTasks: []
+  };
+
+  return render(
+    <ThemeProvider theme={testTheme}>
+      <RecentTasksList {...defaultProps} {...props} />
+    </ThemeProvider>
+  );
+}
 
 describe('RecentTasksList', () => {
   beforeEach(() => {
     jest.clearAllMocks();
   });
 
+  // ─── Rendering ──────────────────────────────────────────────
+
   describe('Rendering', () => {
-    test('renders empty state when no recent tasks', () => {
-      renderWithTheme(
-        <TaskStateProvider>
-          <RecentTasksList
-            recentTasks={[]}
-            allTasks={sampleTasks}
-            onRun={jest.fn()}
-            onToggleStar={jest.fn()}
-            starredTasks={[]}
-          />
-        </TaskStateProvider>
-      );
+    test('empty state: no recent tasks', () => {
+      renderRecentTasks({ tasks: [] });
 
-      expect(screen.getByText(/recent/i)).toBeInTheDocument();
-      expect(screen.queryByRole('button', { name: /run/i })).not.toBeInTheDocument();
+      expect(screen.getByText(/Recently Used \(0\)/)).toBeInTheDocument();
+      expect(screen.getByText(/no recently used tasks/i)).toBeInTheDocument();
     });
 
-    test('renders recent tasks list', () => {
-      renderWithTheme(
-        <TaskStateProvider>
-          <RecentTasksList
-            recentTasks={['npm: test', 'npm: build']}
-            allTasks={sampleTasks}
-            onRun={jest.fn()}
-            onToggleStar={jest.fn()}
-            starredTasks={[]}
-          />
-        </TaskStateProvider>
-      );
+    test('displays recent tasks list', () => {
+      renderRecentTasks({ tasks: ['test', 'build'] });
 
-      expect(screen.getByText(/test/i)).toBeInTheDocument();
-      expect(screen.getByText(/build/i)).toBeInTheDocument();
+      expect(screen.getByText('test')).toBeInTheDocument();
+      expect(screen.getByText('build')).toBeInTheDocument();
     });
 
-    test('matches snapshot with recent tasks', () => {
-      const { container } = renderWithTheme(
-        <TaskStateProvider>
-          <RecentTasksList
-            recentTasks={['npm: test', 'npm: build']}
-            allTasks={sampleTasks}
-            onRun={jest.fn()}
-            onToggleStar={jest.fn()}
-            starredTasks={[]}
-          />
-        </TaskStateProvider>
-      );
+    test('shows count in header', () => {
+      renderRecentTasks({ tasks: ['test', 'build'] });
+
+      expect(screen.getByText(/Recently Used \(2\)/)).toBeInTheDocument();
+    });
+
+    test('shows displayLabel from allTasks when available', () => {
+      const allTasks = [
+        { id: 'myid', label: 'test', displayLabel: 'Run Tests', source: 'Workspace', definition: {} }
+      ];
+
+      renderRecentTasks({ tasks: ['myid'], allTasks });
+
+      expect(screen.getByText('Run Tests')).toBeInTheDocument();
+    });
+
+    test('snapshot: panel with recent tasks', () => {
+      const { container } = renderRecentTasks({ tasks: ['test', 'build'] });
 
       expect(container).toMatchSnapshot();
     });
   });
 
+  // ─── User Interactions ──────────────────────────────────────
+
   describe('User Interactions', () => {
-    test('calls onRun when play button clicked', async () => {
+    test('click play button → runs task', async () => {
       const user = userEvent.setup({ delay: null });
       const onRun = jest.fn();
 
-      renderWithTheme(
-        <TaskStateProvider>
-          <RecentTasksList
-            recentTasks={['npm: test']}
-            allTasks={sampleTasks}
-            onRun={onRun}
-            onToggleStar={jest.fn()}
-            starredTasks={[]}
-          />
-        </TaskStateProvider>
-      );
+      renderRecentTasks({ tasks: ['test'], onRun });
 
-      const playButton = screen.getByRole('button', { name: /run/i });
-      await user.click(playButton);
+      const playIcon = screen.getByTestId('PlayArrowIcon');
+      await user.click(playIcon.closest('button'));
 
-      expect(onRun).toHaveBeenCalledWith('npm: test');
+      expect(onRun).toHaveBeenCalledWith('test');
     });
 
-    test('calls onToggleStar when star button clicked', async () => {
+    test('click star button → toggles starred state', async () => {
       const user = userEvent.setup({ delay: null });
       const onToggleStar = jest.fn();
 
-      renderWithTheme(
-        <TaskStateProvider>
-          <RecentTasksList
-            recentTasks={['npm: test']}
-            allTasks={sampleTasks}
-            onRun={jest.fn()}
-            onToggleStar={onToggleStar}
-            starredTasks={[]}
-          />
-        </TaskStateProvider>
-      );
+      renderRecentTasks({ tasks: ['test'], onToggleStar, starredTasks: [] });
 
-      const starButton = screen.getByRole('button', { name: /star/i });
-      await user.click(starButton);
+      const starIcon = screen.getByTestId('StarBorderIcon');
+      await user.click(starIcon.closest('button'));
 
-      expect(onToggleStar).toHaveBeenCalledWith('npm: test');
+      expect(onToggleStar).toHaveBeenCalledWith('test');
     });
-  });
 
-  describe('Collapse State', () => {
-    test('toggles collapse state when button clicked', async () => {
+    test('shows filled star for starred tasks', () => {
+      renderRecentTasks({ tasks: ['test'], starredTasks: ['test'] });
+
+      expect(screen.getByTestId('StarIcon')).toBeInTheDocument();
+    });
+
+    test('toggle collapse/expand (local state)', async () => {
       const user = userEvent.setup({ delay: null });
 
-      renderWithTheme(
-        <TaskStateProvider>
-          <RecentTasksList
-            recentTasks={['npm: test']}
-            allTasks={sampleTasks}
-            onRun={jest.fn()}
-            onToggleStar={jest.fn()}
-            starredTasks={[]}
-          />
-        </TaskStateProvider>
-      );
+      renderRecentTasks({ tasks: ['test', 'build'] });
 
-      const collapseButton = screen.getByRole('button', { name: /collapse/i });
-      await user.click(collapseButton);
+      // Initially expanded, task should be visible
+      expect(screen.getByText('test')).toBeInTheDocument();
 
-      // Tasks should be hidden after collapse
-      expect(screen.queryByText(/test/i)).not.toBeInTheDocument();
+      // Click collapse
+      const collapseIcon = screen.getByTestId('ExpandLessIcon');
+      await user.click(collapseIcon.closest('button'));
+
+      // Tasks should be hidden
+      expect(screen.queryByText('test')).not.toBeInTheDocument();
+
+      // Click expand
+      const expandIcon = screen.getByTestId('ExpandMoreIcon');
+      await user.click(expandIcon.closest('button'));
+
+      // Tasks should be visible again
+      expect(screen.getByText('test')).toBeInTheDocument();
     });
   });
 });

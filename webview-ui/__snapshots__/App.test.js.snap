@@ -1,6 +1,6 @@
 // Jest Snapshot v1, https://goo.gl/fbAQLP
 
-exports[`App Component Rendering matches snapshot for initial state 1`] = `
+exports[`App Component Rendering snapshot: initial state 1`] = `
 <div>
   <div
     class="loading"

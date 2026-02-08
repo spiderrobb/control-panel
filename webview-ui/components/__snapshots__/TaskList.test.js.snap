@@ -1,0 +1,284 @@
+// Jest Snapshot v1, https://goo.gl/fbAQLP
+
+exports[`TaskList Component Rendering snapshot: empty state 1`] = `
+<div>
+  <div
+    class="task-list empty"
+  >
+    <p>
+      No tasks found matching: 
+      <code>
+        zzz
+      </code>
+    </p>
+  </div>
+</div>
+`;
+
+exports[`TaskList Component Rendering snapshot: multiple tasks layout 1`] = `
+<div>
+  <div
+    class="task-list"
+  >
+    <ul>
+      <li>
+        <span
+          class="task-link"
+        >
+          <span
+            class="task-expanded"
+          >
+            <span
+              aria-label="Add to starred tasks"
+              class=""
+              data-mui-internal-clone-element="true"
+            >
+              <button
+                class="MuiButtonBase-root MuiIconButton-root MuiIconButton-sizeSmall css-1vt5ql0-MuiButtonBase-root-MuiIconButton-root"
+                tabindex="0"
+                type="button"
+              >
+                <svg
+                  aria-hidden="true"
+                  class="MuiSvgIcon-root MuiSvgIcon-fontSizeMedium css-6dq5bp-MuiSvgIcon-root"
+                  data-testid="StarBorderIcon"
+                  focusable="false"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    d="m22 9.24-7.19-.62L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21 12 17.27 18.18 21l-1.63-7.03zM12 15.4l-3.76 2.27 1-4.28-3.32-2.88 4.38-.38L12 6.1l1.71 4.04 4.38.38-3.32 2.88 1 4.28z"
+                  />
+                </svg>
+              </button>
+            </span>
+            <span
+              class="task-label"
+              title="Double-click to open task definition in tasks.json"
+            >
+              test
+            </span>
+            <span
+              aria-label="Run this task"
+              class=""
+              data-mui-internal-clone-element="true"
+            >
+              <button
+                class="MuiButtonBase-root MuiIconButton-root MuiIconButton-sizeSmall css-n72kyw-MuiButtonBase-root-MuiIconButton-root"
+                tabindex="0"
+                type="button"
+              >
+                <svg
+                  aria-hidden="true"
+                  class="MuiSvgIcon-root MuiSvgIcon-fontSizeMedium css-6dq5bp-MuiSvgIcon-root"
+                  data-testid="PlayArrowIcon"
+                  focusable="false"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    d="M8 5v14l11-7z"
+                  />
+                </svg>
+              </button>
+            </span>
+          </span>
+        </span>
+      </li>
+      <li>
+        <span
+          class="task-link"
+        >
+          <span
+            class="task-expanded"
+          >
+            <span
+              aria-label="Add to starred tasks"
+              class=""
+              data-mui-internal-clone-element="true"
+            >
+              <button
+                class="MuiButtonBase-root MuiIconButton-root MuiIconButton-sizeSmall css-1vt5ql0-MuiButtonBase-root-MuiIconButton-root"
+                tabindex="0"
+                type="button"
+              >
+                <svg
+                  aria-hidden="true"
+                  class="MuiSvgIcon-root MuiSvgIcon-fontSizeMedium css-6dq5bp-MuiSvgIcon-root"
+                  data-testid="StarBorderIcon"
+                  focusable="false"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    d="m22 9.24-7.19-.62L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21 12 17.27 18.18 21l-1.63-7.03zM12 15.4l-3.76 2.27 1-4.28-3.32-2.88 4.38-.38L12 6.1l1.71 4.04 4.38.38-3.32 2.88 1 4.28z"
+                  />
+                </svg>
+              </button>
+            </span>
+            <span
+              class="task-label"
+              title="Double-click to open task definition in tasks.json"
+            >
+              build
+            </span>
+            <span
+              aria-label="Run this task"
+              class=""
+              data-mui-internal-clone-element="true"
+            >
+              <button
+                class="MuiButtonBase-root MuiIconButton-root MuiIconButton-sizeSmall css-n72kyw-MuiButtonBase-root-MuiIconButton-root"
+                tabindex="0"
+                type="button"
+              >
+                <svg
+                  aria-hidden="true"
+                  class="MuiSvgIcon-root MuiSvgIcon-fontSizeMedium css-6dq5bp-MuiSvgIcon-root"
+                  data-testid="PlayArrowIcon"
+                  focusable="false"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    d="M8 5v14l11-7z"
+                  />
+                </svg>
+              </button>
+            </span>
+          </span>
+        </span>
+      </li>
+      <li>
+        <span
+          class="task-link"
+        >
+          <span
+            class="task-expanded"
+          >
+            <span
+              aria-label="Add to starred tasks"
+              class=""
+              data-mui-internal-clone-element="true"
+            >
+              <button
+                class="MuiButtonBase-root MuiIconButton-root MuiIconButton-sizeSmall css-1vt5ql0-MuiButtonBase-root-MuiIconButton-root"
+                tabindex="0"
+                type="button"
+              >
+                <svg
+                  aria-hidden="true"
+                  class="MuiSvgIcon-root MuiSvgIcon-fontSizeMedium css-6dq5bp-MuiSvgIcon-root"
+                  data-testid="StarBorderIcon"
+                  focusable="false"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    d="m22 9.24-7.19-.62L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21 12 17.27 18.18 21l-1.63-7.03zM12 15.4l-3.76 2.27 1-4.28-3.32-2.88 4.38-.38L12 6.1l1.71 4.04 4.38.38-3.32 2.88 1 4.28z"
+                  />
+                </svg>
+              </button>
+            </span>
+            <span
+              class="task-label"
+              title="Double-click to open task definition in tasks.json"
+            >
+              <div
+                class="MuiChip-root MuiChip-filled MuiChip-sizeSmall MuiChip-colorDefault MuiChip-filledDefault css-dloa4z-MuiChip-root"
+              >
+                <span
+                  class="MuiChip-label MuiChip-labelSmall css-eccknh-MuiChip-label"
+                >
+                  npm
+                </span>
+              </div>
+              test
+            </span>
+            <span
+              aria-label="Run this task"
+              class=""
+              data-mui-internal-clone-element="true"
+            >
+              <button
+                class="MuiButtonBase-root MuiIconButton-root MuiIconButton-sizeSmall css-n72kyw-MuiButtonBase-root-MuiIconButton-root"
+                tabindex="0"
+                type="button"
+              >
+                <svg
+                  aria-hidden="true"
+                  class="MuiSvgIcon-root MuiSvgIcon-fontSizeMedium css-6dq5bp-MuiSvgIcon-root"
+                  data-testid="PlayArrowIcon"
+                  focusable="false"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    d="M8 5v14l11-7z"
+                  />
+                </svg>
+              </button>
+            </span>
+          </span>
+        </span>
+      </li>
+      <li>
+        <span
+          class="task-link"
+        >
+          <span
+            class="task-expanded"
+          >
+            <span
+              aria-label="Add to starred tasks"
+              class=""
+              data-mui-internal-clone-element="true"
+            >
+              <button
+                class="MuiButtonBase-root MuiIconButton-root MuiIconButton-sizeSmall css-1vt5ql0-MuiButtonBase-root-MuiIconButton-root"
+                tabindex="0"
+                type="button"
+              >
+                <svg
+                  aria-hidden="true"
+                  class="MuiSvgIcon-root MuiSvgIcon-fontSizeMedium css-6dq5bp-MuiSvgIcon-root"
+                  data-testid="StarBorderIcon"
+                  focusable="false"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    d="m22 9.24-7.19-.62L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21 12 17.27 18.18 21l-1.63-7.03zM12 15.4l-3.76 2.27 1-4.28-3.32-2.88 4.38-.38L12 6.1l1.71 4.04 4.38.38-3.32 2.88 1 4.28z"
+                  />
+                </svg>
+              </button>
+            </span>
+            <span
+              class="task-label"
+              title="Double-click to open task definition in tasks.json"
+            >
+              lint
+            </span>
+            <span
+              aria-label="Run this task"
+              class=""
+              data-mui-internal-clone-element="true"
+            >
+              <button
+                class="MuiButtonBase-root MuiIconButton-root MuiIconButton-sizeSmall css-n72kyw-MuiButtonBase-root-MuiIconButton-root"
+                tabindex="0"
+                type="button"
+              >
+                <svg
+                  aria-hidden="true"
+                  class="MuiSvgIcon-root MuiSvgIcon-fontSizeMedium css-6dq5bp-MuiSvgIcon-root"
+                  data-testid="PlayArrowIcon"
+                  focusable="false"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    d="M8 5v14l11-7z"
+                  />
+                </svg>
+              </button>
+            </span>
+          </span>
+        </span>
+      </li>
+    </ul>
+  </div>
+</div>
+`;

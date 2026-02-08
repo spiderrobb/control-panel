@@ -312,6 +312,97 @@
         "focus": false,
         "panel": "shared"
       }
+    },
+
+    // ─── Demo: Multi-level dependency pipeline ───────────────
+    // Stage 1 leaf tasks (parallel)
+    {
+      "label": "demo:s1-lint",
+      "type": "shell",
+      "command": "echo '🔍 Linting...' && sleep 2 && echo '✅ Lint passed'",
+      "problemMatcher": []
+    },
+    {
+      "label": "demo:s1-types",
+      "type": "shell",
+      "command": "echo '🔍 Type checking...' && sleep 3 && echo '✅ Types OK'",
+      "problemMatcher": []
+    },
+    {
+      "label": "demo:s1-format",
+      "type": "shell",
+      "command": "echo '🔍 Checking format...' && sleep 1 && echo '✅ Format OK'",
+      "problemMatcher": []
+    },
+    // Stage 2 leaf tasks (sequential)
+    {
+      "label": "demo:s2-unit",
+      "type": "shell",
+      "command": "echo '🧪 Running unit tests...' && sleep 2 && echo '✅ Unit tests passed'",
+      "problemMatcher": []
+    },
+    {
+      "label": "demo:s2-integration",
+      "type": "shell",
+      "command": "echo '🧪 Running integration tests...' && sleep 3 && echo '✅ Integration tests passed'",
+      "problemMatcher": []
+    },
+    {
+      "label": "demo:s2-e2e",
+      "type": "shell",
+      "command": "echo '🧪 Running e2e tests...' && sleep 4 && echo '✅ E2E tests passed'",
+      "problemMatcher": []
+    },
+    // Stage 3 leaf tasks (parallel)
+    {
+      "label": "demo:s3-bundle",
+      "type": "shell",
+      "command": "echo '📦 Bundling app...' && sleep 3 && echo '✅ Bundle complete'",
+      "problemMatcher": []
+    },
+    {
+      "label": "demo:s3-assets",
+      "type": "shell",
+      "command": "echo '📦 Processing assets...' && sleep 2 && echo '✅ Assets ready'",
+      "problemMatcher": []
+    },
+    {
+      "label": "demo:s3-docs",
+      "type": "shell",
+      "command": "echo '📦 Generating docs...' && sleep 1 && echo '✅ Docs generated'",
+      "problemMatcher": []
+    },
+    // Stage mid-level tasks
+    {
+      "label": "demo:stage-1",
+      "type": "shell",
+      "command": "echo '✅ Stage 1: Static analysis complete'",
+      "dependsOn": ["demo:s1-lint", "demo:s1-types", "demo:s1-format"],
+      "problemMatcher": []
+    },
+    {
+      "label": "demo:stage-2",
+      "type": "shell",
+      "command": "echo '✅ Stage 2: Test suite complete'",
+      "dependsOn": ["demo:s2-unit", "demo:s2-integration", "demo:s2-e2e"],
+      "dependsOrder": "sequence",
+      "problemMatcher": []
+    },
+    {
+      "label": "demo:stage-3",
+      "type": "shell",
+      "command": "echo '✅ Stage 3: Build artifacts complete'",
+      "dependsOn": ["demo:s3-bundle", "demo:s3-assets", "demo:s3-docs"],
+      "problemMatcher": []
+    },
+    // Root pipeline
+    {
+      "label": "demo:pipeline",
+      "type": "shell",
+      "command": "echo '🚀 Full pipeline complete!'",
+      "dependsOn": ["demo:stage-1", "demo:stage-2", "demo:stage-3"],
+      "dependsOrder": "sequence",
+      "problemMatcher": []
     }
   ]
 }

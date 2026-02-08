@@ -1,0 +1,136 @@
+// Jest Snapshot v1, https://goo.gl/fbAQLP
+
+exports[`StarredTasksList Rendering snapshot: panel with starred tasks 1`] = `
+<div>
+  <div
+    class="starred-tasks-panel"
+  >
+    <div
+      class="panel-header"
+    >
+      <h3>
+        Starred Tasks (
+        2
+        /20)
+      </h3>
+      <button
+        aria-label="Collapse"
+        class="MuiButtonBase-root MuiIconButton-root MuiIconButton-sizeSmall css-1wjptj6-MuiButtonBase-root-MuiIconButton-root"
+        data-mui-internal-clone-element="true"
+        tabindex="0"
+        type="button"
+      >
+        <svg
+          aria-hidden="true"
+          class="MuiSvgIcon-root MuiSvgIcon-fontSizeMedium css-19pfla-MuiSvgIcon-root"
+          data-testid="ExpandLessIcon"
+          focusable="false"
+          viewBox="0 0 24 24"
+        >
+          <path
+            d="m12 8-6 6 1.41 1.41L12 10.83l4.59 4.58L18 14z"
+          />
+        </svg>
+      </button>
+    </div>
+    <div
+      class="panel-content"
+    >
+      <div
+        class="task-list-item"
+      >
+        <button
+          aria-label="Unstar"
+          class="MuiButtonBase-root MuiIconButton-root MuiIconButton-sizeSmall css-1wjptj6-MuiButtonBase-root-MuiIconButton-root"
+          data-mui-internal-clone-element="true"
+          tabindex="0"
+          type="button"
+        >
+          <svg
+            aria-hidden="true"
+            class="MuiSvgIcon-root MuiSvgIcon-fontSizeMedium css-6dq5bp-MuiSvgIcon-root"
+            data-testid="StarIcon"
+            focusable="false"
+            viewBox="0 0 24 24"
+          >
+            <path
+              d="M12 17.27 18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"
+            />
+          </svg>
+        </button>
+        <span
+          class="task-label"
+        >
+          test
+        </span>
+        <button
+          aria-label="Run task"
+          class="MuiButtonBase-root MuiIconButton-root MuiIconButton-sizeSmall css-1wjptj6-MuiButtonBase-root-MuiIconButton-root"
+          data-mui-internal-clone-element="true"
+          tabindex="0"
+          type="button"
+        >
+          <svg
+            aria-hidden="true"
+            class="MuiSvgIcon-root MuiSvgIcon-fontSizeMedium css-6dq5bp-MuiSvgIcon-root"
+            data-testid="PlayArrowIcon"
+            focusable="false"
+            viewBox="0 0 24 24"
+          >
+            <path
+              d="M8 5v14l11-7z"
+            />
+          </svg>
+        </button>
+      </div>
+      <div
+        class="task-list-item"
+      >
+        <button
+          aria-label="Unstar"
+          class="MuiButtonBase-root MuiIconButton-root MuiIconButton-sizeSmall css-1wjptj6-MuiButtonBase-root-MuiIconButton-root"
+          data-mui-internal-clone-element="true"
+          tabindex="0"
+          type="button"
+        >
+          <svg
+            aria-hidden="true"
+            class="MuiSvgIcon-root MuiSvgIcon-fontSizeMedium css-6dq5bp-MuiSvgIcon-root"
+            data-testid="StarIcon"
+            focusable="false"
+            viewBox="0 0 24 24"
+          >
+            <path
+              d="M12 17.27 18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"
+            />
+          </svg>
+        </button>
+        <span
+          class="task-label"
+        >
+          build
+        </span>
+        <button
+          aria-label="Run task"
+          class="MuiButtonBase-root MuiIconButton-root MuiIconButton-sizeSmall css-1wjptj6-MuiButtonBase-root-MuiIconButton-root"
+          data-mui-internal-clone-element="true"
+          tabindex="0"
+          type="button"
+        >
+          <svg
+            aria-hidden="true"
+            class="MuiSvgIcon-root MuiSvgIcon-fontSizeMedium css-6dq5bp-MuiSvgIcon-root"
+            data-testid="PlayArrowIcon"
+            focusable="false"
+            viewBox="0 0 24 24"
+          >
+            <path
+              d="M8 5v14l11-7z"
+            />
+          </svg>
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+`;

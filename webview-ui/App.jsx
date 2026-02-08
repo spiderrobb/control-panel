@@ -49,32 +49,12 @@ function generateHeadingId(text) {
 }
 
 function TaskListWithState(props) {
-  const { 
-    tasks, 
-    runningTasks, 
-    onRun, 
-    onStop, 
-    onFocus, 
-    onOpenDefinition, 
-    starredTasks, 
-    onToggleStar, 
-    npmPathColorMap, 
-    setNpmPathColorMap 
-  } = useTaskState();
+  const { tasks } = useTaskState();
 
   return (
     <TaskList
       {...props}
       tasks={tasks}
-      onRun={onRun}
-      onStop={onStop}
-      onFocus={onFocus}
-      onOpenDefinition={onOpenDefinition}
-      runningTasks={runningTasks}
-      starredTasks={starredTasks}
-      onToggleStar={onToggleStar}
-      npmPathColorMap={npmPathColorMap}
-      setNpmPathColorMap={setNpmPathColorMap}
     />
   );
 }

@@ -1,23 +1,113 @@
 // Jest Snapshot v1, https://goo.gl/fbAQLP
 
-exports[`ExecutionHistoryPanel Rendering matches snapshot with execution history 1`] = `
+exports[`ExecutionHistoryPanel Rendering snapshot: panel with execution history 1`] = `
 <div>
   <div
-    class="execution-history-empty"
+    class="execution-history-panel"
   >
     <div
-      class="empty-state"
+      class="execution-list"
     >
-      <p
-        class="empty-title"
-      >
-        No task executions recorded
-      </p>
-      <p
-        class="empty-message"
-      >
-        Task execution history will appear here as you run tasks from the Control Panel.
-      </p>
+      <div>
+        <div
+          class="execution-item"
+          style="padding-left: 16px;"
+        >
+          <div
+            class="execution-row"
+          >
+            <div
+              class="execution-info"
+            >
+              <span
+                style="width: 24px; display: inline-block;"
+              />
+              <svg
+                aria-hidden="true"
+                class="MuiSvgIcon-root MuiSvgIcon-fontSizeMedium css-1724qk3-MuiSvgIcon-root"
+                data-testid="CheckCircleIcon"
+                focusable="false"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2m-2 15-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8z"
+                />
+              </svg>
+              <span
+                class="execution-label"
+              >
+                test
+              </span>
+            </div>
+            <div
+              class="execution-meta"
+            >
+              <span
+                aria-label="9:13 PM"
+                class="execution-time"
+                data-mui-internal-clone-element="true"
+              >
+                59m ago
+              </span>
+              <span
+                class="execution-duration"
+              >
+                10.0s
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div>
+        <div
+          class="execution-item"
+          style="padding-left: 16px;"
+        >
+          <div
+            class="execution-row"
+          >
+            <div
+              class="execution-info"
+            >
+              <span
+                style="width: 24px; display: inline-block;"
+              />
+              <svg
+                aria-hidden="true"
+                class="MuiSvgIcon-root MuiSvgIcon-fontSizeMedium css-1724qk3-MuiSvgIcon-root"
+                data-testid="CheckCircleIcon"
+                focusable="false"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2m-2 15-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8z"
+                />
+              </svg>
+              <span
+                class="execution-label"
+              >
+                build
+              </span>
+            </div>
+            <div
+              class="execution-meta"
+            >
+              <span
+                aria-label="8:13 PM"
+                class="execution-time"
+                data-mui-internal-clone-element="true"
+              >
+                1h ago
+              </span>
+              <span
+                class="execution-duration"
+              >
+                30.0s
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 </div>

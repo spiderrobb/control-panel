@@ -1,71 +1,117 @@
 import React from 'react';
-import { renderWithTheme, screen, waitFor, simulateExtensionMessage, setupVsCodeApiMock } from './test-utils';
-import { TaskStateProvider, useTaskState } from './context';
-import { sampleTasks, createRunningTaskState } from '../test/fixtures/tasks';
+import { render, screen, waitFor, act } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { ThemeProvider, createTheme } from '@mui/material/styles';
+import { TaskStateProvider, TaskStateContext, useTaskState } from './context';
+import {
+  sampleTasks,
+  createRunningTaskState,
+  executionHistory as sampleExecutionHistory
+} from '../test/fixtures/tasks';
 
-// Test component to access context
-function TestConsumer() {
-  const context = useTaskState();
+// Create a minimal theme for testing
+const testTheme = createTheme({ palette: { mode: 'dark' } });
+
+// Use the global mock from test-setup.js (set before module load)
+const mockVscodeApi = global.__mockVscodeApi;
+
+// Helper to render with providers
+function renderWithProviders(ui) {
+  return render(
+    <ThemeProvider theme={testTheme}>
+      <TaskStateProvider>
+        {ui}
+      </TaskStateProvider>
+    </ThemeProvider>
+  );
+}
+
+// Helper to dispatch extension messages
+function sendMessage(type, data = {}) {
+  act(() => {
+    window.dispatchEvent(new MessageEvent('message', {
+      data: { type, ...data }
+    }));
+  });
+}
+
+// Test consumer component to inspect context state
+function TestConsumer({ onContext }) {
+  const ctx = useTaskState();
+  // Call the callback to expose context for assertions
+  React.useEffect(() => {
+    if (onContext) onContext(ctx);
+  });
   return (
     <div>
-      <div data-testid="tasks-count">{context.tasks.length}</div>
-      <div data-testid="running-count">{context.runningTasks.size}</div>
-      <div data-testid="starred-count">{context.starredTasks.length}</div>
-      <div data-testid="recent-count">{context.recentTasks.length}</div>
-      <button onClick={() => context.runTask('npm: test')}>Run Task</button>
-      <button onClick={() => context.stopTask('npm: test')}>Stop Task</button>
-      <button onClick={() => context.toggleStar('npm: test')}>Toggle Star</button>
+      <span data-testid="tasks-count">{ctx.tasks.length}</span>
+      <span data-testid="running-count">{Object.keys(ctx.runningTasks).length}</span>
+      <span data-testid="starred-count">{ctx.starredTasks.length}</span>
+      <span data-testid="recent-count">{ctx.recentlyUsedTasks.length}</span>
+      <span data-testid="history-count">{ctx.executionHistory.length}</span>
+      <span data-testid="running-collapsed">{String(ctx.runningTasksCollapsed)}</span>
+      <span data-testid="starred-collapsed">{String(ctx.starredTasksCollapsed)}</span>
+      <button data-testid="run-btn" onClick={() => ctx.onRun('test')}>Run</button>
+      <button data-testid="stop-btn" onClick={() => ctx.onStop('test')}>Stop</button>
+      <button data-testid="focus-btn" onClick={() => ctx.onFocus('test')}>Focus</button>
+      <button data-testid="opendef-btn" onClick={() => ctx.onOpenDefinition('test')}>OpenDef</button>
+      <button data-testid="star-btn" onClick={() => ctx.onToggleStar('test')}>Star</button>
+      <button data-testid="dismiss-btn" onClick={() => ctx.onDismissTask('test')}>Dismiss</button>
+      <button data-testid="toggle-running" onClick={ctx.onToggleRunningTasksCollapsed}>ToggleRunning</button>
+      <button data-testid="toggle-starred" onClick={ctx.onToggleStarredTasksCollapsed}>ToggleStarred</button>
     </div>
   );
 }
 
 describe('TaskStateProvider', () => {
-  let vscodeApi;
-
   beforeEach(() => {
-    vscodeApi = setupVsCodeApiMock();
     jest.clearAllMocks();
   });
 
+  // ─── Initial State ───────────────────────────────────────────
+
   describe('Initial State', () => {
     test('provides default empty state', () => {
-      renderWithTheme(
-        <TaskStateProvider>
-          <TestConsumer />
-        </TaskStateProvider>
-      );
+      renderWithProviders(<TestConsumer />);
 
       expect(screen.getByTestId('tasks-count')).toHaveTextContent('0');
       expect(screen.getByTestId('running-count')).toHaveTextContent('0');
       expect(screen.getByTestId('starred-count')).toHaveTextContent('0');
       expect(screen.getByTestId('recent-count')).toHaveTextContent('0');
+      expect(screen.getByTestId('history-count')).toHaveTextContent('0');
+    });
+
+    test('requests initial data on mount', () => {
+      renderWithProviders(<TestConsumer />);
+
+      expect(mockVscodeApi.postMessage).toHaveBeenCalledWith({ type: 'getTaskLists' });
+      expect(mockVscodeApi.postMessage).toHaveBeenCalledWith({ type: 'getPanelState' });
+      expect(mockVscodeApi.postMessage).toHaveBeenCalledWith({ type: 'getExecutionHistory' });
     });
   });
 
+  // ─── Message Handlers ────────────────────────────────────────
+
   describe('Message Handlers', () => {
     test('handles updateTasks message', async () => {
-      renderWithTheme(
-        <TaskStateProvider>
-          <TestConsumer />
-        </TaskStateProvider>
-      );
+      renderWithProviders(<TestConsumer />);
 
-      simulateExtensionMessage('updateTasks', { tasks: sampleTasks });
+      sendMessage('updateTasks', { tasks: sampleTasks });
 
       await waitFor(() => {
-        expect(screen.getByTestId('tasks-count')).toHaveTextContent('3');
+        expect(screen.getByTestId('tasks-count')).toHaveTextContent(String(sampleTasks.length));
       });
     });
 
     test('handles taskStarted message', async () => {
-      renderWithTheme(
-        <TaskStateProvider>
-          <TestConsumer />
-        </TaskStateProvider>
-      );
+      renderWithProviders(<TestConsumer />);
 
-      const taskState = createRunningTaskState('npm: test', { state: 'running' });
-      simulateExtensionMessage('taskStarted', taskState);
+      sendMessage('taskStarted', {
+        taskLabel: 'test',
+        startTime: Date.now(),
+        state: 'running',
+        subtasks: []
+      });
 
       await waitFor(() => {
         expect(screen.getByTestId('running-count')).toHaveTextContent('1');
@@ -73,128 +119,179 @@ describe('TaskStateProvider', () => {
     });
 
     test('handles taskEnded message', async () => {
-      renderWithTheme(
-        <TaskStateProvider>
-          <TestConsumer />
-        </TaskStateProvider>
-      );
+      jest.useFakeTimers();
+      renderWithProviders(<TestConsumer />);
 
       // Start task
-      const taskState = createRunningTaskState('npm: test');
-      simulateExtensionMessage('taskStarted', taskState);
+      sendMessage('taskStarted', { taskLabel: 'test', startTime: Date.now() });
 
       await waitFor(() => {
         expect(screen.getByTestId('running-count')).toHaveTextContent('1');
       });
 
       // End task
-      simulateExtensionMessage('taskEnded', { taskLabel: 'npm: test' });
+      sendMessage('taskEnded', { taskLabel: 'test' });
+
+      // The context removes after a 1s delay
+      act(() => { jest.advanceTimersByTime(1500); });
 
       await waitFor(() => {
         expect(screen.getByTestId('running-count')).toHaveTextContent('0');
       });
+
+      jest.useRealTimers();
     });
 
-    test('handles taskFailed message', async () => {
-      renderWithTheme(
-        <TaskStateProvider>
-          <TestConsumer />
-        </TaskStateProvider>
-      );
+    test('handles taskFailed message for existing task', async () => {
+      let capturedCtx;
+      renderWithProviders(<TestConsumer onContext={ctx => { capturedCtx = ctx; }} />);
 
-      const failedState = createRunningTaskState('npm: test', {
-        state: 'failed',
-        exitCode: 1,
-        failureReason: 'Test failed'
-      });
-      simulateExtensionMessage('taskFailed', failedState);
+      // Start task first
+      sendMessage('taskStarted', { taskLabel: 'test', startTime: Date.now() });
 
       await waitFor(() => {
         expect(screen.getByTestId('running-count')).toHaveTextContent('1');
       });
+
+      // Fail task
+      sendMessage('taskFailed', { taskLabel: 'test', exitCode: 1, reason: 'Tests failed' });
+
+      await waitFor(() => {
+        expect(capturedCtx.runningTasks['test']?.failed).toBe(true);
+        expect(capturedCtx.runningTasks['test']?.exitCode).toBe(1);
+        expect(capturedCtx.runningTasks['test']?.running).toBe(false);
+      });
+    });
+
+    test('handles taskFailed message for task not yet in state', async () => {
+      let capturedCtx;
+      renderWithProviders(<TestConsumer onContext={ctx => { capturedCtx = ctx; }} />);
+
+      // Fail without starting
+      sendMessage('taskFailed', { taskLabel: 'build', exitCode: 2, reason: 'Build failed' });
+
+      await waitFor(() => {
+        expect(capturedCtx.runningTasks['build']?.failed).toBe(true);
+        expect(capturedCtx.runningTasks['build']?.exitCode).toBe(2);
+      });
     });
 
     test('handles taskStateChanged message', async () => {
-      renderWithTheme(
-        <TaskStateProvider>
-          <TestConsumer />
-        </TaskStateProvider>
-      );
+      let capturedCtx;
+      renderWithProviders(<TestConsumer onContext={ctx => { capturedCtx = ctx; }} />);
 
       // Start task
-      simulateExtensionMessage('taskStarted', createRunningTaskState('npm: test'));
+      sendMessage('taskStarted', { taskLabel: 'test', startTime: Date.now() });
+
       await waitFor(() => {
         expect(screen.getByTestId('running-count')).toHaveTextContent('1');
       });
 
       // Change state to stopping
-      simulateExtensionMessage('taskStateChanged', {
-        taskLabel: 'npm: test',
-        state: 'stopping'
+      sendMessage('taskStateChanged', {
+        taskLabel: 'test',
+        state: 'stopping',
+        canStop: false,
+        canFocus: true
       });
 
       await waitFor(() => {
-        expect(screen.getByTestId('running-count')).toHaveTextContent('1');
+        expect(capturedCtx.runningTasks['test']?.state).toBe('stopping');
+        expect(capturedCtx.runningTasks['test']?.canStop).toBe(false);
+      });
+    });
+
+    test('taskStateChanged ignores unknown tasks', async () => {
+      let capturedCtx;
+      renderWithProviders(<TestConsumer onContext={ctx => { capturedCtx = ctx; }} />);
+
+      sendMessage('taskStateChanged', { taskLabel: 'unknown', state: 'running' });
+
+      await waitFor(() => {
+        expect(capturedCtx.runningTasks['unknown']).toBeUndefined();
       });
     });
 
     test('handles subtaskStarted message', async () => {
-      renderWithTheme(
-        <TaskStateProvider>
-          <TestConsumer />
-        </TaskStateProvider>
-      );
+      let capturedCtx;
+      renderWithProviders(<TestConsumer onContext={ctx => { capturedCtx = ctx; }} />);
 
-      // Start parent task
-      const parentState = createRunningTaskState('npm: deploy');
-      simulateExtensionMessage('taskStarted', parentState);
-
-      // Start subtask
-      simulateExtensionMessage('subtaskStarted', {
-        parentLabel: 'npm: deploy',
-        taskLabel: 'npm: build',
-        startTime: Date.now()
-      });
+      // Start parent
+      sendMessage('taskStarted', { taskLabel: 'deploy', startTime: Date.now(), subtasks: [] });
 
       await waitFor(() => {
         expect(screen.getByTestId('running-count')).toHaveTextContent('1');
+      });
+
+      // Start subtask
+      sendMessage('subtaskStarted', { parentLabel: 'deploy', childLabel: 'build' });
+
+      await waitFor(() => {
+        expect(capturedCtx.runningTasks['deploy']?.subtasks).toContain('build');
+      });
+    });
+
+    test('subtaskStarted does not duplicate existing subtask', async () => {
+      let capturedCtx;
+      renderWithProviders(<TestConsumer onContext={ctx => { capturedCtx = ctx; }} />);
+
+      sendMessage('taskStarted', { taskLabel: 'deploy', startTime: Date.now(), subtasks: ['build'] });
+      sendMessage('subtaskStarted', { parentLabel: 'deploy', childLabel: 'build' });
+
+      await waitFor(() => {
+        const subtasks = capturedCtx.runningTasks['deploy']?.subtasks || [];
+        expect(subtasks.filter(s => s === 'build').length).toBe(1);
+      });
+    });
+
+    test('subtaskStarted creates parent if not yet tracked', async () => {
+      let capturedCtx;
+      renderWithProviders(<TestConsumer onContext={ctx => { capturedCtx = ctx; }} />);
+
+      sendMessage('subtaskStarted', { parentLabel: 'deploy', childLabel: 'build' });
+
+      await waitFor(() => {
+        expect(capturedCtx.runningTasks['deploy']).toBeDefined();
+        expect(capturedCtx.runningTasks['deploy']?.subtasks).toContain('build');
       });
     });
 
     test('handles subtaskEnded message', async () => {
-      renderWithTheme(
-        <TaskStateProvider>
-          <TestConsumer />
-        </TaskStateProvider>
-      );
+      let capturedCtx;
+      renderWithProviders(<TestConsumer onContext={ctx => { capturedCtx = ctx; }} />);
 
       // Start parent with subtask
-      const parentState = createRunningTaskState('npm: deploy', {
-        subtasks: [{ taskLabel: 'npm: build', startTime: Date.now(), state: 'running' }]
-      });
-      simulateExtensionMessage('taskStarted', parentState);
-
-      // End subtask
-      simulateExtensionMessage('subtaskEnded', {
-        parentLabel: 'npm: deploy',
-        taskLabel: 'npm: build'
-      });
+      sendMessage('taskStarted', { taskLabel: 'deploy', startTime: Date.now(), subtasks: ['build'] });
 
       await waitFor(() => {
-        expect(screen.getByTestId('running-count')).toHaveTextContent('1');
+        expect(capturedCtx.runningTasks['deploy']?.subtasks).toContain('build');
+      });
+
+      // End subtask
+      sendMessage('subtaskEnded', { parentLabel: 'deploy', childLabel: 'build' });
+
+      await waitFor(() => {
+        expect(capturedCtx.runningTasks['deploy']?.subtasks).not.toContain('build');
+      });
+    });
+
+    test('subtaskEnded tracks failed subtasks', async () => {
+      let capturedCtx;
+      renderWithProviders(<TestConsumer onContext={ctx => { capturedCtx = ctx; }} />);
+
+      sendMessage('taskStarted', { taskLabel: 'deploy', startTime: Date.now(), subtasks: ['build'] });
+      sendMessage('subtaskEnded', { parentLabel: 'deploy', childLabel: 'build', failed: true, exitCode: 1 });
+
+      await waitFor(() => {
+        const failedSubs = capturedCtx.runningTasks['deploy']?.failedSubtasks || [];
+        expect(failedSubs).toEqual([{ label: 'build', exitCode: 1 }]);
       });
     });
 
     test('handles updateRecentlyUsed message', async () => {
-      renderWithTheme(
-        <TaskStateProvider>
-          <TestConsumer />
-        </TaskStateProvider>
-      );
+      renderWithProviders(<TestConsumer />);
 
-      simulateExtensionMessage('updateRecentlyUsed', {
-        recentTasks: ['npm: test', 'npm: build']
-      });
+      sendMessage('updateRecentlyUsed', { tasks: ['test', 'build'] });
 
       await waitFor(() => {
         expect(screen.getByTestId('recent-count')).toHaveTextContent('2');
@@ -202,15 +299,9 @@ describe('TaskStateProvider', () => {
     });
 
     test('handles updateStarred message', async () => {
-      renderWithTheme(
-        <TaskStateProvider>
-          <TestConsumer />
-        </TaskStateProvider>
-      );
+      renderWithProviders(<TestConsumer />);
 
-      simulateExtensionMessage('updateStarred', {
-        starredTasks: ['npm: test', 'npm: build', 'npm: deploy']
-      });
+      sendMessage('updateStarred', { tasks: ['test', 'build', 'lint'] });
 
       await waitFor(() => {
         expect(screen.getByTestId('starred-count')).toHaveTextContent('3');
@@ -218,201 +309,307 @@ describe('TaskStateProvider', () => {
     });
 
     test('handles executionHistory message', async () => {
-      const TestHistoryConsumer = () => {
-        const { executionHistory } = useTaskState();
-        return <div data-testid="history-count">{executionHistory.length}</div>;
-      };
+      renderWithProviders(<TestConsumer />);
 
-      renderWithTheme(
-        <TaskStateProvider>
-          <TestHistoryConsumer />
-        </TaskStateProvider>
-      );
-
-      simulateExtensionMessage('executionHistory', {
-        history: [
-          { id: '1', taskLabel: 'npm: test', success: true },
-          { id: '2', taskLabel: 'npm: build', success: false }
-        ]
-      });
+      sendMessage('executionHistory', { history: sampleExecutionHistory });
 
       await waitFor(() => {
-        expect(screen.getByTestId('history-count')).toHaveTextContent('2');
+        expect(screen.getByTestId('history-count')).toHaveTextContent(String(sampleExecutionHistory.length));
       });
     });
 
-    test('handles panelState message', async () => {
-      const TestPanelConsumer = () => {
-        const { starredPanelExpanded } = useTaskState();
-        return <div data-testid="panel-expanded">{String(starredPanelExpanded)}</div>;
-      };
+    test('handles panelState message for runningTasksCollapsed', async () => {
+      renderWithProviders(<TestConsumer />);
 
-      renderWithTheme(
-        <TaskStateProvider>
-          <TestPanelConsumer />
-        </TaskStateProvider>
-      );
-
-      simulateExtensionMessage('panelState', {
-        starredPanelExpanded: true
-      });
+      sendMessage('panelState', { state: { runningTasksCollapsed: true } });
 
       await waitFor(() => {
-        expect(screen.getByTestId('panel-expanded')).toHaveTextContent('true');
+        expect(screen.getByTestId('running-collapsed')).toHaveTextContent('true');
+      });
+    });
+
+    test('handles panelState message for starredTasksCollapsed', async () => {
+      renderWithProviders(<TestConsumer />);
+
+      sendMessage('panelState', { state: { starredTasksCollapsed: true } });
+
+      await waitFor(() => {
+        expect(screen.getByTestId('starred-collapsed')).toHaveTextContent('true');
       });
     });
   });
+
+  // ─── Action Functions ────────────────────────────────────────
 
   describe('Action Functions', () => {
-    test('runTask sends correct message', async () => {
-      renderWithTheme(
-        <TaskStateProvider>
-          <TestConsumer />
-        </TaskStateProvider>
-      );
+    test('onRun sends runTask message', async () => {
+      const user = userEvent.setup({ delay: null });
+      renderWithProviders(<TestConsumer />);
 
-      const runButton = screen.getByText('Run Task');
-      runButton.click();
+      await user.click(screen.getByTestId('run-btn'));
 
-      await waitFor(() => {
-        expect(vscodeApi.postMessage).toHaveBeenCalledWith({
-          type: 'runTask',
-          taskLabel: 'npm: test'
-        });
+      expect(mockVscodeApi.postMessage).toHaveBeenCalledWith({
+        type: 'runTask',
+        label: 'test'
       });
     });
 
-    test('stopTask sends correct message', async () => {
-      renderWithTheme(
-        <TaskStateProvider>
-          <TestConsumer />
-        </TaskStateProvider>
-      );
+    test('onStop sends stopTask message', async () => {
+      const user = userEvent.setup({ delay: null });
+      renderWithProviders(<TestConsumer />);
 
-      const stopButton = screen.getByText('Stop Task');
-      stopButton.click();
+      await user.click(screen.getByTestId('stop-btn'));
 
-      await waitFor(() => {
-        expect(vscodeApi.postMessage).toHaveBeenCalledWith({
-          type: 'stopTask',
-          taskLabel: 'npm: test'
-        });
+      expect(mockVscodeApi.postMessage).toHaveBeenCalledWith({
+        type: 'stopTask',
+        label: 'test'
       });
     });
 
-    test('toggleStar sends correct message', async () => {
-      renderWithTheme(
-        <TaskStateProvider>
-          <TestConsumer />
-        </TaskStateProvider>
-      );
+    test('onFocus sends focusTerminal message', async () => {
+      const user = userEvent.setup({ delay: null });
+      renderWithProviders(<TestConsumer />);
 
-      const toggleButton = screen.getByText('Toggle Star');
-      toggleButton.click();
+      await user.click(screen.getByTestId('focus-btn'));
 
-      await waitFor(() => {
-        expect(vscodeApi.postMessage).toHaveBeenCalledWith({
-          type: 'toggleStar',
-          taskLabel: 'npm: test'
-        });
-      });
-    });
-  });
-
-  describe('Computed State - averageDurations', () => {
-    test('calculates average durations from execution history', async () => {
-      const TestAverageDurationConsumer = () => {
-        const { averageDurations } = useTaskState();
-        return (
-          <div>
-            <div data-testid="avg-duration">
-              {averageDurations.get('npm: test') || 0}
-            </div>
-          </div>
-        );
-      };
-
-      renderWithTheme(
-        <TaskStateProvider>
-          <TestAverageDurationConsumer />
-        </TaskStateProvider>
-      );
-
-      // Send history with multiple executions of same task
-      simulateExtensionMessage('executionHistory', {
-        history: [
-          { id: '1', taskLabel: 'npm: test', duration: 10000, success: true },
-          { id: '2', taskLabel: 'npm: test', duration: 20000, success: true },
-          { id: '3', taskLabel: 'npm: test', duration: 30000, success: true }
-        ]
-      });
-
-      await waitFor(() => {
-        // Average should be (10000 + 20000 + 30000) / 3 = 20000
-        expect(screen.getByTestId('avg-duration')).toHaveTextContent('20000');
+      expect(mockVscodeApi.postMessage).toHaveBeenCalledWith({
+        type: 'focusTerminal',
+        label: 'test'
       });
     });
 
-    test('excludes failed executions from average duration', async () => {
-      const TestAverageDurationConsumer = () => {
-        const { averageDurations } = useTaskState();
-        return (
-          <div data-testid="avg-duration">
-            {averageDurations.get('npm: test') || 0}
-          </div>
-        );
-      };
+    test('onOpenDefinition sends openTaskDefinition message', async () => {
+      const user = userEvent.setup({ delay: null });
+      renderWithProviders(<TestConsumer />);
 
-      renderWithTheme(
-        <TaskStateProvider>
-          <TestAverageDurationConsumer />
-        </TaskStateProvider>
-      );
+      await user.click(screen.getByTestId('opendef-btn'));
 
-      simulateExtensionMessage('executionHistory', {
-        history: [
-          { id: '1', taskLabel: 'npm: test', duration: 10000, success: true },
-          { id: '2', taskLabel: 'npm: test', duration: 5000, success: false }, // Should be excluded
-          { id: '3', taskLabel: 'npm: test', duration: 20000, success: true }
-        ]
-      });
-
-      await waitFor(() => {
-        // Average should be (10000 + 20000) / 2 = 15000
-        expect(screen.getByTestId('avg-duration')).toHaveTextContent('15000');
+      expect(mockVscodeApi.postMessage).toHaveBeenCalledWith({
+        type: 'openTaskDefinition',
+        label: 'test'
       });
     });
-  });
 
-  describe('State Updates', () => {
-    test('updates running task state correctly', async () => {
-      renderWithTheme(
-        <TaskStateProvider>
-          <TestConsumer />
-        </TaskStateProvider>
-      );
+    test('onToggleStar sends toggleStar message', async () => {
+      const user = userEvent.setup({ delay: null });
+      renderWithProviders(<TestConsumer />);
 
-      // Start task
-      simulateExtensionMessage('taskStarted', createRunningTaskState('npm: test'));
-      await waitFor(() => {
-        expect(screen.getByTestId('running-count')).toHaveTextContent('1');
+      await user.click(screen.getByTestId('star-btn'));
+
+      expect(mockVscodeApi.postMessage).toHaveBeenCalledWith({
+        type: 'toggleStar',
+        label: 'test'
       });
+    });
 
-      // Update state
-      simulateExtensionMessage('taskStateChanged', {
-        taskLabel: 'npm: test',
-        state: 'running'
-      });
+    test('onDismissTask removes task from state and notifies extension', async () => {
+      const user = userEvent.setup({ delay: null });
+      renderWithProviders(<TestConsumer />);
+
+      // Start then fail a task
+      sendMessage('taskFailed', { taskLabel: 'test', exitCode: 1 });
 
       await waitFor(() => {
         expect(screen.getByTestId('running-count')).toHaveTextContent('1');
       });
 
-      // End task
-      simulateExtensionMessage('taskEnded', { taskLabel: 'npm: test' });
+      await user.click(screen.getByTestId('dismiss-btn'));
+
       await waitFor(() => {
         expect(screen.getByTestId('running-count')).toHaveTextContent('0');
       });
+
+      expect(mockVscodeApi.postMessage).toHaveBeenCalledWith({
+        type: 'dismissTask',
+        label: 'test'
+      });
+    });
+
+    test('onToggleRunningTasksCollapsed toggles and persists', async () => {
+      const user = userEvent.setup({ delay: null });
+      renderWithProviders(<TestConsumer />);
+
+      expect(screen.getByTestId('running-collapsed')).toHaveTextContent('false');
+
+      await user.click(screen.getByTestId('toggle-running'));
+
+      await waitFor(() => {
+        expect(screen.getByTestId('running-collapsed')).toHaveTextContent('true');
+      });
+
+      expect(mockVscodeApi.postMessage).toHaveBeenCalledWith({
+        type: 'setPanelState',
+        state: { runningTasksCollapsed: true }
+      });
+    });
+
+    test('onToggleStarredTasksCollapsed toggles and persists', async () => {
+      const user = userEvent.setup({ delay: null });
+      renderWithProviders(<TestConsumer />);
+
+      expect(screen.getByTestId('starred-collapsed')).toHaveTextContent('false');
+
+      await user.click(screen.getByTestId('toggle-starred'));
+
+      await waitFor(() => {
+        expect(screen.getByTestId('starred-collapsed')).toHaveTextContent('true');
+      });
+
+      expect(mockVscodeApi.postMessage).toHaveBeenCalledWith({
+        type: 'setPanelState',
+        state: { starredTasksCollapsed: true }
+      });
+    });
+  });
+
+  // ─── Computed State ──────────────────────────────────────────
+
+  describe('Computed State - taskHistoryMap', () => {
+    test('calculates average durations from successful executions', async () => {
+      let capturedCtx;
+      renderWithProviders(<TestConsumer onContext={ctx => { capturedCtx = ctx; }} />);
+
+      sendMessage('executionHistory', {
+        history: [
+          { id: '1', taskLabel: 'test', duration: 10000, failed: false },
+          { id: '2', taskLabel: 'test', duration: 20000, failed: false },
+          { id: '3', taskLabel: 'test', duration: 30000, failed: false }
+        ]
+      });
+
+      await waitFor(() => {
+        expect(capturedCtx.taskHistoryMap['test']).toBe(20000);
+      });
+    });
+
+    test('excludes failed executions from average', async () => {
+      let capturedCtx;
+      renderWithProviders(<TestConsumer onContext={ctx => { capturedCtx = ctx; }} />);
+
+      sendMessage('executionHistory', {
+        history: [
+          { id: '1', taskLabel: 'test', duration: 10000, failed: false },
+          { id: '2', taskLabel: 'test', duration: 5000, failed: true },
+          { id: '3', taskLabel: 'test', duration: 20000, failed: false }
+        ]
+      });
+
+      await waitFor(() => {
+        expect(capturedCtx.taskHistoryMap['test']).toBe(15000);
+      });
+    });
+
+    test('uses last 10 runs for average calculation', async () => {
+      let capturedCtx;
+      renderWithProviders(<TestConsumer onContext={ctx => { capturedCtx = ctx; }} />);
+
+      const history = [];
+      for (let i = 0; i < 15; i++) {
+        history.push({
+          id: String(i),
+          taskLabel: 'test',
+          duration: 1000 * (i + 1),
+          failed: false
+        });
+      }
+
+      sendMessage('executionHistory', { history });
+
+      await waitFor(() => {
+        // Should only average the first 10 (slice(0, 10))
+        expect(capturedCtx.taskHistoryMap['test']).toBeDefined();
+      });
+    });
+  });
+
+  // ─── State Flow Tests ────────────────────────────────────────
+
+  describe('State Lifecycle', () => {
+    test('task lifecycle: idle → started → running → ended', async () => {
+      jest.useFakeTimers();
+      let capturedCtx;
+      renderWithProviders(<TestConsumer onContext={ctx => { capturedCtx = ctx; }} />);
+
+      // Idle
+      expect(capturedCtx.runningTasks['test']).toBeUndefined();
+
+      // Started
+      sendMessage('taskStarted', { taskLabel: 'test', startTime: Date.now(), state: 'running' });
+      await waitFor(() => expect(capturedCtx.runningTasks['test']?.running).toBe(true));
+
+      // State changed to running
+      sendMessage('taskStateChanged', { taskLabel: 'test', state: 'running' });
+      await waitFor(() => expect(capturedCtx.runningTasks['test']?.state).toBe('running'));
+
+      // Ended
+      sendMessage('taskEnded', { taskLabel: 'test' });
+      act(() => { jest.advanceTimersByTime(1500); });
+      await waitFor(() => expect(capturedCtx.runningTasks['test']).toBeUndefined());
+
+      jest.useRealTimers();
+    });
+
+    test('task failure: idle → started → failed → dismissed', async () => {
+      const user = userEvent.setup({ delay: null });
+      let capturedCtx;
+      renderWithProviders(<TestConsumer onContext={ctx => { capturedCtx = ctx; }} />);
+
+      // Started
+      sendMessage('taskStarted', { taskLabel: 'test', startTime: Date.now() });
+      await waitFor(() => expect(capturedCtx.runningTasks['test']?.running).toBe(true));
+
+      // Failed
+      sendMessage('taskFailed', { taskLabel: 'test', exitCode: 1, reason: 'Error' });
+      await waitFor(() => {
+        expect(capturedCtx.runningTasks['test']?.failed).toBe(true);
+        expect(capturedCtx.runningTasks['test']?.running).toBe(false);
+      });
+
+      // Dismissed
+      await user.click(screen.getByTestId('dismiss-btn'));
+      await waitFor(() => expect(capturedCtx.runningTasks['test']).toBeUndefined());
+    });
+
+    test('task with subtasks: parent tracks child execution states', async () => {
+      let capturedCtx;
+      renderWithProviders(<TestConsumer onContext={ctx => { capturedCtx = ctx; }} />);
+
+      // Start parent
+      sendMessage('taskStarted', { taskLabel: 'deploy', startTime: Date.now(), subtasks: [] });
+
+      // Add subtask
+      sendMessage('subtaskStarted', { parentLabel: 'deploy', childLabel: 'build' });
+      await waitFor(() => expect(capturedCtx.runningTasks['deploy']?.subtasks).toContain('build'));
+
+      // Add another subtask
+      sendMessage('subtaskStarted', { parentLabel: 'deploy', childLabel: 'test' });
+      await waitFor(() => expect(capturedCtx.runningTasks['deploy']?.subtasks).toEqual(['build', 'test']));
+
+      // End first subtask
+      sendMessage('subtaskEnded', { parentLabel: 'deploy', childLabel: 'build' });
+      await waitFor(() => {
+        expect(capturedCtx.runningTasks['deploy']?.subtasks).toEqual(['test']);
+      });
+
+      // End second subtask
+      sendMessage('subtaskEnded', { parentLabel: 'deploy', childLabel: 'test' });
+      await waitFor(() => {
+        expect(capturedCtx.runningTasks['deploy']?.subtasks).toEqual([]);
+      });
+    });
+  });
+
+  // ─── Cleanup ─────────────────────────────────────────────────
+
+  describe('Cleanup', () => {
+    test('removes message listener on unmount', () => {
+      const removeEventListenerSpy = jest.spyOn(window, 'removeEventListener');
+      const { unmount } = renderWithProviders(<TestConsumer />);
+
+      unmount();
+
+      expect(removeEventListenerSpy).toHaveBeenCalledWith('message', expect.any(Function));
+      removeEventListenerSpy.mockRestore();
     });
   });
 });

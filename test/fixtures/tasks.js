@@ -1,168 +1,292 @@
 // Shared task fixtures for testing both extension and webview components
 
 /**
- * Sample tasks for testing
+ * Sample tasks matching the structure returned by VS Code's fetchTasks()
+ * after being serialized for the webview.
  */
 export const sampleTasks = [
   {
+    id: 'shell|test|/workspaces/ControlPanel',
+    label: 'test',
+    displayLabel: 'test',
+    source: 'Workspace',
+    definition: {
+      type: 'shell',
+      command: 'npm test',
+      label: 'test'
+    },
+    dependsOn: [],
+    dependsOrder: undefined
+  },
+  {
+    id: 'shell|build|/workspaces/ControlPanel',
+    label: 'build',
+    displayLabel: 'build',
+    source: 'Workspace',
+    definition: {
+      type: 'shell',
+      command: 'webpack --mode production',
+      label: 'build'
+    },
+    dependsOn: [],
+    dependsOrder: undefined
+  },
+  {
+    id: 'npm|test|/workspaces/ControlPanel',
+    label: 'test',
+    displayLabel: 'test',
+    source: 'npm',
     definition: {
       type: 'npm',
       script: 'test',
-      path: '/workspaces/ControlPanel',
-      label: 'npm: test'
+      path: '/workspaces/ControlPanel'
     },
-    name: 'test',
-    source: 'npm',
-    isBackground: false
+    dependsOn: [],
+    dependsOrder: undefined
   },
   {
-    definition: {
-      type: 'npm',
-      script: 'build',
-      path: '/workspaces/ControlPanel',
-      label: 'npm: build'
-    },
-    name: 'build',
-    source: 'npm',
-    isBackground: false
-  },
-  {
+    id: 'shell|lint|/workspaces/ControlPanel',
+    label: 'lint',
+    displayLabel: 'lint',
+    source: 'Workspace',
     definition: {
       type: 'shell',
-      command: 'echo "Hello World"',
-      label: 'shell: echo'
+      command: 'eslint .',
+      label: 'lint'
     },
-    name: 'echo',
-    source: 'shell',
-    isBackground: false
+    dependsOn: [],
+    dependsOrder: undefined
   }
 ];
 
 /**
- * Task with dependencies for testing composite task scenarios
+ * Task with sequential dependencies
  */
 export const taskWithDependencies = {
+  id: 'shell|deploy|/workspaces/ControlPanel',
+  label: 'deploy',
+  displayLabel: 'deploy',
+  source: 'Workspace',
   definition: {
-    type: 'npm',
-    script: 'deploy',
-    path: '/workspaces/ControlPanel',
-    label: 'npm: deploy',
-    dependsOn: ['npm: build', 'npm: test']
+    type: 'shell',
+    command: 'echo deploy',
+    label: 'deploy'
   },
-  name: 'deploy',
-  source: 'npm',
-  isBackground: false
+  dependsOn: ['build', 'test'],
+  dependsOrder: 'sequence'
 };
 
 /**
- * Running task state samples
+ * Task with parallel dependencies
+ */
+export const taskWithParallelDeps = {
+  id: 'shell|ci|/workspaces/ControlPanel',
+  label: 'ci',
+  displayLabel: 'ci',
+  source: 'Workspace',
+  definition: {
+    type: 'shell',
+    command: 'echo ci',
+    label: 'ci'
+  },
+  dependsOn: ['lint', 'test'],
+  dependsOrder: 'parallel'
+};
+
+/**
+ * Running task state samples (matching the runningTasks object shape in context.js)
  */
 export const runningTaskStates = {
   simple: {
-    taskLabel: 'npm: test',
-    startTime: Date.now() - 5000, // Started 5 seconds ago
-    state: 'running'
+    running: true,
+    startTime: Date.now() - 5000,
+    state: 'running',
+    subtasks: [],
+    isFirstRun: false,
+    avgDuration: null,
+    canStop: true,
+    canFocus: true
   },
   withProgress: {
-    taskLabel: 'npm: build',
+    running: true,
     startTime: Date.now() - 10000,
     state: 'running',
-    expectedDuration: 30000
+    subtasks: [],
+    isFirstRun: false,
+    avgDuration: 30000,
+    canStop: true,
+    canFocus: true
+  },
+  firstRun: {
+    running: true,
+    startTime: Date.now() - 3000,
+    state: 'running',
+    subtasks: [],
+    isFirstRun: true,
+    avgDuration: null,
+    canStop: true,
+    canFocus: true
   },
   failed: {
-    taskLabel: 'npm: test',
+    running: false,
+    failed: true,
     startTime: Date.now() - 8000,
-    endTime: Date.now() - 1000,
-    state: 'failed',
     exitCode: 1,
-    failureReason: 'Test suite failed'
+    failureReason: 'Test suite failed',
+    subtasks: [],
+    state: 'failed'
+  },
+  failedWithDependency: {
+    running: false,
+    failed: true,
+    startTime: Date.now() - 5000,
+    exitCode: 1,
+    failureReason: 'Dependency failed',
+    failedDependency: 'lint',
+    subtasks: [],
+    state: 'failed'
   },
   withSubtasks: {
-    taskLabel: 'npm: deploy',
+    running: true,
     startTime: Date.now() - 15000,
     state: 'running',
-    subtasks: [
-      {
-        taskLabel: 'npm: build',
-        startTime: Date.now() - 15000,
-        endTime: Date.now() - 10000,
-        state: 'completed'
-      },
-      {
-        taskLabel: 'npm: test',
-        startTime: Date.now() - 10000,
-        state: 'running'
-      }
-    ]
+    subtasks: ['build', 'test'],
+    isFirstRun: false,
+    avgDuration: 60000,
+    canFocus: false,
+    canStop: true
+  },
+  stopping: {
+    running: true,
+    startTime: Date.now() - 10000,
+    state: 'stopping',
+    subtasks: [],
+    canStop: false,
+    canFocus: true
   }
 };
 
 /**
- * Execution history samples
+ * Execution history samples matching the shape used by ExecutionHistoryPanel
  */
 export const executionHistory = [
   {
-    id: '1',
-    taskLabel: 'npm: test',
-    startTime: Date.now() - 3600000, // 1 hour ago
+    id: 'exec-1',
+    taskLabel: 'test',
+    startTime: Date.now() - 3600000,
     endTime: Date.now() - 3590000,
     duration: 10000,
-    success: true,
+    failed: false,
     exitCode: 0
   },
   {
-    id: '2',
-    taskLabel: 'npm: build',
-    startTime: Date.now() - 7200000, // 2 hours ago
+    id: 'exec-2',
+    taskLabel: 'build',
+    startTime: Date.now() - 7200000,
     endTime: Date.now() - 7170000,
     duration: 30000,
-    success: true,
+    failed: false,
     exitCode: 0
   },
   {
-    id: '3',
-    taskLabel: 'npm: test',
-    startTime: Date.now() - 10800000, // 3 hours ago
+    id: 'exec-3',
+    taskLabel: 'test',
+    startTime: Date.now() - 10800000,
     endTime: Date.now() - 10795000,
     duration: 5000,
-    success: false,
-    exitCode: 1
+    failed: true,
+    exitCode: 1,
+    reason: 'Test suite failed'
   }
 ];
 
 /**
- * Helper to create a mock VS Code Task object
+ * Execution history with parent/child relationships
+ */
+export const executionHistoryWithChildren = [
+  {
+    id: 'exec-parent-1',
+    taskLabel: 'deploy',
+    startTime: Date.now() - 3600000,
+    endTime: Date.now() - 3540000,
+    duration: 60000,
+    failed: false,
+    exitCode: 0,
+    childLabels: ['build', 'test']
+  },
+  {
+    id: 'exec-child-1',
+    taskLabel: 'build',
+    startTime: Date.now() - 3600000,
+    endTime: Date.now() - 3570000,
+    duration: 30000,
+    failed: false,
+    exitCode: 0,
+    parentLabel: 'deploy'
+  },
+  {
+    id: 'exec-child-2',
+    taskLabel: 'test',
+    startTime: Date.now() - 3570000,
+    endTime: Date.now() - 3540000,
+    duration: 30000,
+    failed: false,
+    exitCode: 0,
+    parentLabel: 'deploy'
+  }
+];
+
+/**
+ * Helper to create a mock task object matching webview task shape
  */
 export function createMockTask(label, options = {}) {
+  const source = options.source || 'Workspace';
+  const type = options.type || 'shell';
   return {
+    id: options.id || `${type}|${label}|/workspaces/ControlPanel`,
+    label,
+    displayLabel: options.displayLabel || label,
+    source,
     definition: {
-      type: options.type || 'npm',
-      script: options.script || label.replace('npm: ', ''),
-      path: options.path || '/workspaces/ControlPanel',
+      type,
+      command: options.command || `echo ${label}`,
+      script: options.script,
+      path: options.path,
       label,
       ...options.definition
     },
-    name: options.name || label,
-    source: options.source || 'npm',
-    isBackground: options.isBackground || false,
-    ...options
+    dependsOn: options.dependsOn || [],
+    dependsOrder: options.dependsOrder
   };
 }
 
 /**
- * Helper to create running task state
+ * Helper to create running task state matching runningTasks object shape
  */
 export function createRunningTaskState(taskLabel, options = {}) {
-  const now = Date.now();
   return {
-    taskLabel,
-    startTime: options.startTime || now,
-    endTime: options.endTime,
-    state: options.state || 'running',
+    running: options.running !== undefined ? options.running : !options.failed,
+    failed: options.failed || false,
+    startTime: options.startTime || Date.now(),
     exitCode: options.exitCode,
     failureReason: options.failureReason,
-    expectedDuration: options.expectedDuration,
+    failedDependency: options.failedDependency,
+    avgDuration: options.avgDuration || null,
+    isFirstRun: options.isFirstRun || false,
     subtasks: options.subtasks || [],
-    ...options
+    parentTask: options.parentTask || null,
+    state: options.state || 'running',
+    canStop: options.canStop !== undefined ? options.canStop : true,
+    canFocus: options.canFocus !== undefined ? options.canFocus : true
   };
 }
+
+/**
+ * Log buffer entries for debug panel testing
+ */
+export const sampleLogBuffer = [
+  { timestamp: '2026-02-07 10:00:01', level: 'INFO', message: 'Task started: test' },
+  { timestamp: '2026-02-07 10:00:02', level: 'DEBUG', message: 'Process spawned with PID 12345' },
+  { timestamp: '2026-02-07 10:00:05', level: 'ERROR', message: 'Test suite failed with exit code 1' },
+  { timestamp: '2026-02-07 10:00:06', level: 'WARN', message: 'Task retry recommended' }
+];

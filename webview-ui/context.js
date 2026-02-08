@@ -1,5 +1,5 @@
 /* eslint-disable react-hooks/exhaustive-deps */
-import React, { createContext, useContext, useState, useEffect, useMemo, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useMemo, useCallback, useRef } from 'react';
 
 // VS Code API wrapper ensures it is only acquired once
 const vscode = (function() {
@@ -29,9 +29,11 @@ export function TaskStateProvider({ children }) {
   const [starredTasks, setStarredTasks] = useState([]);
   const [recentlyUsedTasks, setRecentlyUsedTasks] = useState([]);
   const [executionHistory, setExecutionHistory] = useState([]);
-  const [npmPathColorMap, setNpmPathColorMap] = useState({});
   const [runningTasksCollapsed, setRunningTasksCollapsed] = useState(false);
   const [starredTasksCollapsed, setStarredTasksCollapsed] = useState(false);
+
+  // Track taskEnded cleanup timers for proper cleanup on unmount
+  const taskEndTimers = useRef([]);
 
   // Compute average durations from execution history
   const taskHistoryMap = useMemo(() => {
@@ -112,6 +114,14 @@ export function TaskStateProvider({ children }) {
     });
   }, []);
 
+  // Cleanup task-end timers on unmount
+  useEffect(() => {
+    const timers = taskEndTimers.current;
+    return () => {
+      timers.forEach(id => clearTimeout(id));
+    };
+  }, []);
+
   useEffect(() => {
     const messageHandler = (event) => {
       const message = event.data;
@@ -142,25 +152,27 @@ export function TaskStateProvider({ children }) {
             };
           });
           break;
-        case 'taskEnded':
+        case 'taskEnded': {
           setRunningTasks(prev => {
-            const updated = { ...prev };
-            if (updated[message.taskLabel]) {
-              updated[message.taskLabel].running = false;
-              // Remove after a short delay for smooth transition
-              setTimeout(() => {
-                setRunningTasks(current => {
-                   // Ensure we don't remove if it started again
-                   if (!current[message.taskLabel] || current[message.taskLabel].running) return current;
-                   const copy = { ...current };
-                   delete copy[message.taskLabel];
-                   return copy;
-                });
-              }, 1000);
-            }
-            return updated;
+            if (!prev[message.taskLabel]) return prev;
+            return {
+              ...prev,
+              [message.taskLabel]: { ...prev[message.taskLabel], running: false }
+            };
           });
+          // Remove after a short delay for smooth transition (outside state updater)
+          const endTimerId = setTimeout(() => {
+            setRunningTasks(current => {
+              // Ensure we don't remove if it started again
+              if (!current[message.taskLabel] || current[message.taskLabel].running) return current;
+              const copy = { ...current };
+              delete copy[message.taskLabel];
+              return copy;
+            });
+          }, 1000);
+          taskEndTimers.current.push(endTimerId);
           break;
+        }
         case 'taskFailed':
           setRunningTasks(prev => {
             const updated = { ...prev };
@@ -286,8 +298,6 @@ export function TaskStateProvider({ children }) {
     recentlyUsedTasks,
     executionHistory,
     taskHistoryMap,
-    npmPathColorMap,
-    setNpmPathColorMap,
     runningTasksCollapsed,
     starredTasksCollapsed,
     onRun: handleRunTask,
