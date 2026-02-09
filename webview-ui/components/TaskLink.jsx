@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import IconButton from '@mui/material/IconButton';
 import Tooltip from '@mui/material/Tooltip';
 import Popover from '@mui/material/Popover';
@@ -10,31 +10,8 @@ import StopIcon from '@mui/icons-material/Stop';
 import BoltIcon from '@mui/icons-material/Bolt';
 import StarIcon from '@mui/icons-material/Star';
 import StarBorderIcon from '@mui/icons-material/StarBorder';
-import FiberManualRecordIcon from '@mui/icons-material/FiberManualRecord';
-import PauseIcon from '@mui/icons-material/Pause';
 import { useTaskState } from '../context';
-
-// Define 10 VS Code theme colors for npm path color-coding
-// Charts: blue, green, orange, purple, yellow, red (official chart colors)
-// Terminal ANSI: cyan, magenta, bright blue, bright magenta (for additional variety)
-const NPM_CHIP_COLORS = [
-  'var(--vscode-charts-blue)',
-  'var(--vscode-charts-green)',
-  'var(--vscode-charts-orange)',
-  'var(--vscode-charts-purple)',
-  'var(--vscode-charts-yellow)',
-  'var(--vscode-charts-red)',
-  'var(--vscode-terminal-ansiCyan)',
-  'var(--vscode-terminal-ansiMagenta)',
-  'var(--vscode-terminal-ansiBrightBlue)',
-  'var(--vscode-terminal-ansiBrightMagenta)'
-];
-
-// Normalize npm path for consistent color assignment
-const normalizePath = (path) => {
-  if (!path) return '';
-  return path.trim().toLowerCase().replace(/^\.\//, '');
-};
+import Segment, { getNpmColor } from './Segment';
 
 function TaskLink({ label, taskId, displayLabel, disabled = false }) {
   const {
@@ -76,23 +53,10 @@ function TaskLink({ label, taskId, displayLabel, disabled = false }) {
   const resolvedId = currentTask?.id;
   
   const isNpmTask = currentTask?.source === 'npm';
-  const npmPath = currentTask?.definition?.path;
   const scriptName = currentTask?.definition?.script;
   
   // For npm tasks, use script name from definition, otherwise use displayLabel/label
   const displayText = isNpmTask && scriptName ? scriptName : (displayLabel || resolvedLabel);
-  
-  // Get deterministic color for npm path via stable hash
-  const getNpmColor = (path) => {
-    if (!path) return NPM_CHIP_COLORS[0];
-    const normalized = normalizePath(path);
-    let hash = 0;
-    for (let i = 0; i < normalized.length; i++) {
-        hash = normalized.charCodeAt(i) + ((hash << 5) - hash);
-    }
-    const index = Math.abs(hash) % NPM_CHIP_COLORS.length;
-    return NPM_CHIP_COLORS[index];
-  };
 
   const taskState = runningTasks[resolvedId] || runningTasks[label];
 
@@ -101,18 +65,32 @@ function TaskLink({ label, taskId, displayLabel, disabled = false }) {
   const startTime = taskState?.startTime || null;
   const avgDuration = taskState?.avgDuration || null;
   const isFirstRun = taskState?.isFirstRun || false;
-  const subtasks = taskState?.subtasks || [];
   const exitCode = taskState?.exitCode;
   const failureReason = taskState?.failureReason;
   const failedDependency = taskState?.failedDependency;
   const canStop = taskState?.canStop !== false;
   const canFocus = taskState?.canFocus !== false;
   
-  const dependencySegments = currentTask?.dependsOn || [];
-  const dependsOrder = currentTask?.dependsOrder;
-  
-  const hasDependencies = dependencySegments.length > 0;
-  const hasRunningSegment = isRunning || dependencySegments.some(dep => runningTasks[dep]?.running);
+  // dependsOn is now a recursive tree of { label, id, source, definition, dependsOn, dependsOrder }
+  const dependencyTree = currentTask?.dependsOn || [];
+  const hasDependencies = dependencyTree.length > 0;
+
+  // Check if any task in the tree is running (for segment tick timer)
+  const hasAnyRunningInTree = useCallback((deps) => {
+    for (const dep of deps) {
+      const key = dep.id || dep.label;
+      // Check by id first, then by extracted label
+      let state = runningTasks[key];
+      if (!state && key.includes('|')) {
+        state = runningTasks[key.split('|')[1]];
+      }
+      if (state?.running) return true;
+      if (dep.dependsOn && dep.dependsOn.length > 0 && hasAnyRunningInTree(dep.dependsOn)) return true;
+    }
+    return false;
+  }, [runningTasks]);
+
+  const hasRunningSegment = isRunning || hasAnyRunningInTree(dependencyTree);
 
   // Update runtime and progress every second when task is running
   useEffect(() => {
@@ -126,7 +104,6 @@ function TaskLink({ label, taskId, displayLabel, disabled = false }) {
       const currentRuntime = Date.now() - startTime;
       setRuntime(currentRuntime);
       
-      // Calculate progress based on average duration
       if (avgDuration && avgDuration > 0 && !isFailed) {
         const calculatedProgress = Math.min((currentRuntime / avgDuration) * 100, 99);
         setProgress(calculatedProgress);
@@ -136,10 +113,9 @@ function TaskLink({ label, taskId, displayLabel, disabled = false }) {
     return () => clearInterval(interval);
   }, [isRunning, isFailed, startTime, avgDuration]);
 
+  // Tick timer for segment progress updates
   useEffect(() => {
-    if (!hasRunningSegment) {
-      return;
-    }
+    if (!hasRunningSegment) return;
 
     const interval = setInterval(() => {
       setSegmentTick(Date.now());
@@ -153,569 +129,167 @@ function TaskLink({ label, taskId, displayLabel, disabled = false }) {
     const minutes = Math.floor(seconds / 60);
     const hours = Math.floor(minutes / 60);
 
-    if (hours > 0) {
-      return `${hours}h ${minutes % 60}m`;
-    } else if (minutes > 0) {
-      return `${minutes}m ${seconds % 60}s`;
-    }
+    if (hours > 0) return `${hours}h ${minutes % 60}m`;
+    if (minutes > 0) return `${minutes}m ${seconds % 60}s`;
     return `${seconds}s`;
   };
 
-  // Determine background style based on state
+  // Background style for task-pill (non-segmented tasks)
   const getBackgroundClass = () => {
     if (isFailed) return 'error';
     if (!isRunning) return '';
-    
-    // Solid blue for tasks over 1 minute
     if (runtime > 60000) return 'bg-solid';
-    
-    // First run: gentle shimmer
     if (isFirstRun || !avgDuration) return 'bg-shimmer';
-    
-    // Subsequent runs: progress gradient
     return 'bg-progress';
   };
 
   const getProgressStyle = () => {
-    if (!isRunning || isFirstRun || !avgDuration || runtime > 60000) {
-      return {};
-    }
-    return {
-      '--progress': `${progress}%`
-    };
+    if (!isRunning || isFirstRun || !avgDuration || runtime > 60000) return {};
+    return { '--progress': `${progress}%` };
   };
 
-  const getSegmentState = (taskLabel) => {
-      // Find task ID for this label if possible
-      const t = tasks.find(t => t.label === taskLabel);
-      const tid = t?.id || taskLabel;
-      const state = runningTasks[tid] || runningTasks[taskLabel];
+  // --- Callbacks passed down to Segment ---
 
+  // Resolve running state — context keys by label, but tree nodes use id
+  const resolveRunningState = useCallback((taskIdOrLabel) => {
+    if (!taskIdOrLabel) return undefined;
+    // Try exact match first (works for labels and ids that match context keys)
+    if (runningTasks[taskIdOrLabel]) return runningTasks[taskIdOrLabel];
+    // If taskIdOrLabel looks like an id (source|label|path), extract label part
+    const parts = taskIdOrLabel.split('|');
+    if (parts.length >= 2) {
+      const labelPart = parts[1];
+      if (runningTasks[labelPart]) return runningTasks[labelPart];
+    }
+    return undefined;
+  }, [runningTasks]);
+
+  const getSegmentState = useCallback((taskIdOrLabel) => {
+    const state = resolveRunningState(taskIdOrLabel);
     if (state?.failed) return 'error';
     if (state?.running) return 'running';
     return 'idle';
-  };
+  }, [resolveRunningState]);
 
-  const getParentDependencyState = () => {
-    if (!hasDependencies) {
-      if (isFailed) return 'error';
-      if (isRunning) return 'running';
-      return 'idle';
-    }
-
-    const childStates = dependencySegments.map(getSegmentState);
-    if (failedDependency || childStates.includes('error')) return 'error';
-    if (childStates.includes('running')) return 'running';
-    if (isFailed) return 'error';
-    if (isRunning) return 'running';
-    return 'idle';
-  };
-
-  const parentDependencyState = getParentDependencyState();
-
-  const getSegmentStateWithParent = (taskLabel) => {
-    const segmentState = getSegmentState(taskLabel);
-    if (segmentState === 'error' || segmentState === 'running') {
-      return segmentState;
-    }
-    // If parent is in error state but this segment is not, mark as success
-    if (parentDependencyState === 'error' && segmentState === 'idle') {
-      return 'success';
-    }
-    return segmentState;
-  };
-
-  const getParentBackgroundClass = () => {
-    if (parentDependencyState === 'error') return 'error';
-    if (parentDependencyState === 'running') return 'bg-solid bg-shimmer';
-    return '';
-  };
-
-  const getSegmentProgressInfo = (segmentLabel, segmentState) => {
-    if (segmentState === 'success' || segmentState === 'error') {
-      return { progress: 100, indeterminate: false };
-    }
-    
-    const t = tasks.find(t => t.label === segmentLabel);
-    const tid = t?.id || segmentLabel;
-    const segmentTaskState = runningTasks[tid] || runningTasks[segmentLabel];
-
-    if (!segmentTaskState?.running || !segmentTaskState?.startTime) {
-      return { progress: 0, indeterminate: false };
-    }
-
-    if (!segmentTaskState?.avgDuration || segmentTaskState.avgDuration <= 0) {
-      return { progress: 35, indeterminate: true };
-    }
+  const getProgressInfo = useCallback((taskIdOrLabel) => {
+    const state = resolveRunningState(taskIdOrLabel);
+    if (state?.failed) return { progress: 100, indeterminate: false };
+    if (!state?.running || !state?.startTime) return { progress: 0, indeterminate: false };
+    if (!state?.avgDuration || state.avgDuration <= 0) return { progress: 35, indeterminate: true };
 
     const now = segmentTick || Date.now();
-    const elapsed = now - segmentTaskState.startTime;
-    const progressValue = Math.min((elapsed / segmentTaskState.avgDuration) * 100, 99);
+    const elapsed = now - state.startTime;
+    const progressValue = Math.min((elapsed / state.avgDuration) * 100, 99);
     return { progress: progressValue, indeterminate: false };
+  }, [runningTasks, segmentTick]);
+
+  const getSegmentDisplayLabel = useCallback((task) => {
+    if (!task) return '';
+    // For the root task, use our pre-computed displayText
+    const key = task.id || task.label;
+    if (key === resolvedId || key === label) return displayText;
+    // For npm tasks, show script name
+    if (task.source === 'npm' && task.definition?.script) return task.definition.script;
+    return task.displayLabel || task.label || '';
+  }, [resolvedId, label, displayText]);
+
+  // --- Popover helpers ---
+
+  const calculateAvgDuration = (taskIdOrLabel) => {
+    const state = resolveRunningState(taskIdOrLabel);
+    if (state?.avgDuration) return state.avgDuration;
+    return taskHistoryMap[taskIdOrLabel] || null;
   };
 
-  const calculateAvgDuration = (taskLabel) => {
-    // If task is running, use its avgDuration from state (most up-to-date)
-    const t = tasks.find(t => t.label === taskLabel);
-    const tid = t?.id || taskLabel;
-    const runningState = runningTasks[tid] || runningTasks[taskLabel];
-
-    if (runningState?.avgDuration) {
-      return runningState.avgDuration;
+  const getSourceFile = (task, idOrLabel) => {
+    if (task?.source === 'npm') {
+      return task?.definition?.path ? `${task.definition.path}/package.json` : 'package.json';
     }
-    
-    // Otherwise, use historical data from execution history
-    return taskHistoryMap[tid] || taskHistoryMap[taskLabel] || null;
+    if (typeof idOrLabel === 'string' && idOrLabel.startsWith('npm|')) return 'package.json';
+    return 'tasks.json';
   };
 
-  const getTaskInfo = (taskLabel) => {
-    let taskData = tasks?.find(t => t.id === taskLabel);
-    if (!taskData) {
-      const matching = tasks?.filter(t => t.label === taskLabel) || [];
-      taskData = matching.find(t => t.source === 'Workspace') || matching[0];
-    }
-    
-    // Helper to determine source file
-    const getSourceFile = (task, idOrLabel) => {
-      // If we have the task object and it is npm
-      if (task?.source === 'npm') {
-        if (task?.definition?.path) {
-          return `${task.definition.path}/package.json`;
-        }
-        return 'package.json';
-      }
+  const formatCommandString = (task) => {
+    if (!task) return 'No command defined';
+    const taskType = task.source || 'unknown';
+    const command = task.definition?.command || task.definition?.script || '';
+    return command ? `${taskType}: ${command}` : `${taskType}: `;
+  };
 
-      // Fallback: If ID looks like an npm task, assume root package.json
-      if (typeof idOrLabel === 'string' && idOrLabel.startsWith('npm|')) {
-        return 'package.json';
-      }
-
-      return 'tasks.json';
-    };
-    
-    // Helper to format command string with task type
-    const formatCommandString = (task) => {
-      if (!task) return 'No command defined';
-      const taskType = task.source || 'unknown';
-      const command = task.definition?.command || task.definition?.script || '';
-      return command ? `${taskType}: ${command}` : `${taskType}: `;
-    };
-    
-    // Check if we are looking at the main task or a dependency
-    const isMainTask = taskLabel === label || taskLabel === resolvedId;
+  const getTaskInfo = useCallback((taskIdOrLabel) => {
+    const isMainTask = taskIdOrLabel === label || taskIdOrLabel === resolvedId;
     
     if (isMainTask) {
       return {
-        name: label,
+        name: resolvedLabel,
         source: currentTask?.source,
-        sourceFile: getSourceFile(currentTask, taskLabel),
+        sourceFile: getSourceFile(currentTask, taskIdOrLabel),
         script: formatCommandString(currentTask),
         status: isFailed ? 'failed' : (isRunning ? 'running' : 'idle'),
         duration: runtime,
         progress: progress,
-        avgDuration: calculateAvgDuration(taskLabel),
+        avgDuration: calculateAvgDuration(taskIdOrLabel),
         exitCode: exitCode,
         failureReason: failureReason
       };
     }
     
-    const t = tasks.find(t => t.label === taskLabel);
-    const tid = t?.id || taskLabel;
-    const segmentState = runningTasks[tid] || runningTasks[taskLabel];
+    let taskData = tasks?.find(t => t.id === taskIdOrLabel);
+    if (!taskData) {
+      const matching = tasks?.filter(t => t.label === taskIdOrLabel) || [];
+      taskData = matching.find(t => t.source === 'Workspace') || matching[0];
+    }
+
+    const segState = resolveRunningState(taskIdOrLabel);
     
     return {
-      name: taskData?.label || taskLabel,
+      name: taskData?.label || taskIdOrLabel,
       source: taskData?.source || 'unknown',
-      sourceFile: getSourceFile(taskData, taskLabel),
+      sourceFile: getSourceFile(taskData, taskIdOrLabel),
       script: formatCommandString(taskData),
-      status: segmentState?.failed ? 'failed' : (segmentState?.running ? 'running' : 'idle'),
-      duration: segmentState?.startTime ? Date.now() - segmentState.startTime : 0,
-      avgDuration: calculateAvgDuration(taskLabel),
-      exitCode: segmentState?.exitCode,
-      failureReason: segmentState?.failureReason
+      status: segState?.failed ? 'failed' : (segState?.running ? 'running' : 'idle'),
+      duration: segState?.startTime ? Date.now() - segState.startTime : 0,
+      avgDuration: calculateAvgDuration(taskIdOrLabel),
+      exitCode: segState?.exitCode,
+      failureReason: segState?.failureReason
     };
-  };
+  }, [tasks, resolveRunningState, runtime, progress, isRunning, isFailed, exitCode, failureReason, resolvedLabel, resolvedId, label, currentTask, taskHistoryMap]);
 
-  const handleSegmentHover = (event, taskLabel) => {
+  const handleSegmentHover = useCallback((event, taskIdOrLabel) => {
     setPopoverAnchor(event.currentTarget);
-    setPopoverContent(getTaskInfo(taskLabel));
-  };
+    setPopoverContent(getTaskInfo(taskIdOrLabel));
+  }, [getTaskInfo]);
 
-  const handleSegmentLeave = () => {
+  const handleSegmentLeave = useCallback(() => {
     setPopoverAnchor(null);
     setPopoverContent(null);
+  }, []);
+
+  // Build the root task node for the Segment tree
+  const rootTaskNode = currentTask ? {
+    label: currentTask.label,
+    id: currentTask.id,
+    source: currentTask.source,
+    definition: currentTask.definition,
+    dependsOn: dependencyTree,
+    dependsOrder: currentTask.dependsOrder || 'parallel'
+  } : {
+    label: label,
+    id: resolvedId,
+    dependsOn: [],
+    dependsOrder: 'parallel'
   };
 
-  const getDisplayLabel = (taskLabel) => {
-    const taskData = tasks?.find(t => t.id === taskLabel || t.label === taskLabel);
-    if (taskData?.source === 'npm' && taskData?.definition?.script) {
-      return taskData.definition.script;
-    }
-    return taskData?.displayLabel || taskLabel;
-  };
-  
-  const getTaskSource = (taskLabel) => {
-    const task = tasks?.find(t => t.id === taskLabel || t.label === taskLabel);
-    return task?.source;
-  };
-  
-  const getTaskNpmPath = (taskLabel) => {
-    const task = tasks?.find(t => t.id === taskLabel || t.label === taskLabel);
-    return task?.definition?.path;
-  };
-
-  const renderSegment = (segmentLabel, state, isParent = false, style = undefined) => {
-    const progressInfo = getSegmentProgressInfo(segmentLabel, state);
-    const segmentDisplayLabel = isParent ? displayText : getDisplayLabel(segmentLabel);
-    const segmentSource = isParent ? currentTask?.source : getTaskSource(segmentLabel);
-    const segmentNpmPath = isParent ? npmPath : getTaskNpmPath(segmentLabel);
-    const segmentIsNpm = segmentSource === 'npm';
-    
+  // --- Single Popover instance ---
+  const renderPopover = () => {
+    if (taskNotFound || !popoverAnchor || !popoverContent) return null;
     return (
-      <span
-        key={segmentLabel}
-        className={`task-segment segment-${state} ${isParent ? 'segment-parent' : 'segment-child'} ${progressInfo.indeterminate ? 'segment-indeterminate' : ''}`}
-        onDoubleClick={disabled || taskNotFound ? undefined : () => onOpenDefinition(segmentLabel)}
-        onMouseEnter={(e) => handleSegmentHover(e, segmentLabel)}
-        onMouseLeave={handleSegmentLeave}
-        style={{
-          ...style,
-          '--segment-progress': `${progressInfo.progress}%`
-        }}
-      >
-        {segmentIsNpm && (
-          <Chip
-            label="npm"
-            size="small"
-            sx={{
-              height: 18,
-              fontSize: '10px',
-              fontWeight: 600,
-              marginRight: '6px',
-              backgroundColor: getNpmColor(segmentNpmPath),
-              color: 'var(--vscode-button-foreground)',
-              '& .MuiChip-label': {
-                padding: '0 6px'
-              }
-            }}
-          />
-        )}
-        {segmentDisplayLabel}
-        <span className={`segment-timer ${progressInfo.indeterminate ? 'segment-timer-indeterminate' : ''}`} />
-      </span>
-    );
-  };
-
-  const renderSequentialSegments = () => (
-    <div className="task-segments task-segments-sequence">
-      {renderSegment(label, parentDependencyState, true)}
-      {[...dependencySegments].reverse().map(dep => renderSegment(dep, getSegmentStateWithParent(dep)))}
-    </div>
-  );
-
-  const renderParallelSegments = () => (
-    <div className="task-segments task-segments-parallel" style={{ '--rows': dependencySegments.length }}>
-      {renderSegment(label, parentDependencyState, true, {
-        gridRow: `1 / span ${dependencySegments.length}`,
-        borderRight: '1px solid var(--vscode-button-border)'
-      })}
-      {dependencySegments.map((dep, index) => (
-        renderSegment(dep, getSegmentStateWithParent(dep), false, {
-          gridColumn: 2,
-          gridRow: index + 1,
-          borderBottom: index === dependencySegments.length - 1 ? 'none' : '1px solid var(--vscode-button-border)'
-        })
-      ))}
-    </div>
-  );
-
-  const renderCompositeSegments = () => {
-    if (!hasDependencies) {
-      return (
-        <span
-          className="task-label"
-          onDoubleClick={disabled || taskNotFound ? undefined : () => onOpenDefinition(resolvedId || label)}
-          title={disabled || taskNotFound ? undefined : "Double-click to open task definition in tasks.json"}
-        >
-          {isNpmTask && (
-            <Chip
-              label="npm"
-              size="small"
-              sx={{
-                height: 18,
-                fontSize: '10px',
-                fontWeight: 600,
-                marginRight: '6px',
-                backgroundColor: getNpmColor(npmPath),
-                color: 'var(--vscode-button-foreground)',
-                '& .MuiChip-label': {
-                  padding: '0 6px'
-                }
-              }}
-            />
-          )}
-          {displayText}
-        </span>
-      );
-    }
-
-    if (dependsOrder === 'parallel') {
-      return renderParallelSegments();
-    }
-
-    return renderSequentialSegments();
-  };
-
-  const tooltipTitle = taskNotFound ? 'Task not found' : '';
-  const containerSx = taskNotFound 
-    ? { opacity: 0.8 }
-    : disabled 
-    ? { 
-        backgroundColor: 'var(--vscode-input-background)',
-        color: 'var(--vscode-descriptionForeground)',
-        opacity: 0.6,
-        cursor: 'not-allowed'
-      }
-    : {};
-
-  if (isRunning || isFailed) {
-    const hasSubtasks = subtasks.length > 0 && !hasDependencies;
-    
-    const content = (
-      <>
-        <div className={`task-link running ${hasSubtasks ? 'with-subtasks' : ''}`}>
-          <div 
-            className={`task-pill ${hasDependencies ? getParentBackgroundClass() : getBackgroundClass()}`} 
-            style={getProgressStyle()}
-            onMouseEnter={(e) => handleSegmentHover(e, resolvedId || label)}
-            onMouseLeave={handleSegmentLeave}
-          >
-          <Tooltip title={disabled || taskNotFound ? '' : (starredTasks?.includes(resolvedId || label) ? 'Remove from starred tasks' : 'Add to starred tasks')}>
-            <span>
-              <IconButton
-                size="small"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onToggleStar?.(resolvedId || label);
-                }}
-                disabled={disabled || taskNotFound}
-                sx={{ p: 0.5, color: 'inherit' }}
-              >
-                {starredTasks?.includes(resolvedId || label) ? <StarIcon sx={{ fontSize: 16 }} /> : <StarBorderIcon sx={{ fontSize: 16 }} />}
-              </IconButton>
-            </span>
-          </Tooltip>
-          {renderCompositeSegments()}
-          {isFailed ? (
-            <>
-              <span className="error-badge" title={failureReason}>
-                Failed {exitCode !== undefined ? `(${exitCode})` : ''}
-              </span>
-              {failedDependency && (
-                <span className="dependency-error" title={`Dependency "${getDisplayLabel(failedDependency)}" failed`}>
-                  ← {getDisplayLabel(failedDependency)}
-                </span>
-              )}
-              <Tooltip title={disabled || taskNotFound ? '' : "Retry this task"}>
-                <span>
-                  <IconButton
-                    size="small"
-                    onClick={() => {
-                      handleSegmentLeave(); // Close popover before retrying
-                      onRun(resolvedId || label);
-                    }}
-                    disabled={disabled || taskNotFound}
-                    sx={{ p: 0.5, ml: 0.5 }}
-                  >
-                    <PlayArrowIcon sx={{ fontSize: 16 }} />
-                  </IconButton>
-                </span>
-              </Tooltip>
-            </>
-          ) : (
-            <>
-              <span className="runtime" title={`Running for ${formatRuntime(runtime)}`}>{formatRuntime(runtime)}</span>
-              <Tooltip title={disabled || taskNotFound ? '' : (canFocus ? "Show terminal output for this task" : "Terminal not available")}>
-                <span>
-                  <IconButton
-                    size="small"
-                    onClick={() => onFocus(resolvedId || label)}
-                    disabled={!canFocus || disabled || taskNotFound}
-                    sx={{ p: 0.5, ml: 0.5 }}
-                  >
-                    <BoltIcon sx={{ fontSize: 16 }} />
-                  </IconButton>
-                </span>
-              </Tooltip>
-              <Tooltip title={taskNotFound ? '' : (canStop ? "Stop this task" : "Cannot stop task")}>
-                <span>
-                  <IconButton
-                    size="small"
-                    onClick={() => onStop(resolvedId || label)}
-                    disabled={!canStop || taskNotFound}
-                    sx={{ p: 0.5 }}
-                  >
-                    <StopIcon sx={{ fontSize: 16 }} />
-                  </IconButton>
-                </span>
-              </Tooltip>
-            </>
-          )}
-        </div>
-        
-        {hasSubtasks && (
-          <div className="subtasks-container">
-            {subtasks.map((subtask, index) => {
-              // Find child running state
-              const cTask = tasks.find(t => t.id === subtask || t.label === subtask);
-              const cId = cTask?.id || subtask;
-              const subtaskRunning = runningTasks[cId]?.running;
-              
-              return (
-                <div key={index} className="subtask-item">
-                  <span className={`subtask-indicator ${subtaskRunning ? 'running' : 'waiting'}`}>
-                    {subtaskRunning ? <FiberManualRecordIcon sx={{ fontSize: 12, color: '#89d185' }} /> : <PauseIcon sx={{ fontSize: 12 }} />}
-                  </span>
-                  <span className="subtask-label">{subtask}</span>
-                  {subtaskRunning && (
-                    <span className="subtask-status">running</span>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
-      {!taskNotFound && popoverAnchor && popoverContent && (
-        <Popover
-          open={Boolean(popoverAnchor)}
-          anchorEl={popoverAnchor}
-          onClose={handleSegmentLeave}
-          anchorOrigin={{
-            vertical: 'bottom',
-            horizontal: 'center',
-          }}
-          transformOrigin={{
-            vertical: 'top',
-            horizontal: 'center',
-          }}
-          sx={{ pointerEvents: 'none' }}
-        >
-          <Box sx={{ p: 1.5, minWidth: 220 }}>
-            {popoverContent.sourceFile && (
-              <Typography variant="caption" sx={{ display: 'block', fontSize: '0.7rem', opacity: 0.6, mb: 0.5 }}>
-                {popoverContent.sourceFile}
-              </Typography>
-            )}
-            <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 0.5 }}>
-              {popoverContent.name}
-            </Typography>
-            {popoverContent.script && (
-              <Typography variant="caption" sx={{ display: 'block', opacity: 0.8, fontFamily: 'monospace', fontSize: '0.75rem', mb: 0.75 }}>
-                {popoverContent.script}
-              </Typography>
-            )}
-            <Typography variant="caption" sx={{ display: 'block', mb: 0.75, opacity: 0.8 }}>
-              Status: <span style={{ fontWeight: 500 }}>{popoverContent.status}</span>
-            </Typography>
-            {popoverContent.duration > 0 && (
-              <Typography variant="caption" sx={{ display: 'block', mb: 0.5, opacity: 0.8 }}>
-                Duration: <span style={{ fontWeight: 500 }}>{formatRuntime(popoverContent.duration)}</span>
-              </Typography>
-            )}
-            {popoverContent.progress > 0 && popoverContent.status === 'running' && (
-              <Typography variant="caption" sx={{ display: 'block', mb: 0.5, opacity: 0.8 }}>
-                Progress: <span style={{ fontWeight: 500 }}>{Math.floor(popoverContent.progress)}%</span>
-              </Typography>
-            )}
-            {popoverContent.avgDuration > 0 && (
-              <Typography variant="caption" sx={{ display: 'block', mb: 0.5, opacity: 0.8 }}>
-                Avg Runtime: <span style={{ fontWeight: 500 }}>{formatRuntime(popoverContent.avgDuration)}</span>
-              </Typography>
-            )}
-            {popoverContent.failureReason && (
-              <Typography variant="caption" sx={{ display: 'block', color: 'error.main', mt: 0.75 }}>
-                {popoverContent.failureReason}
-              </Typography>
-            )}
-            {popoverContent.exitCode !== undefined && popoverContent.status === 'failed' && (
-              <Typography variant="caption" sx={{ display: 'block', opacity: 0.8 }}>
-                Exit Code: <span style={{ fontFamily: 'monospace' }}>{popoverContent.exitCode}</span>
-              </Typography>
-            )}
-          </Box>
-        </Popover>
-      )}
-    </>
-    );
-    
-    return tooltipTitle ? (
-      <Tooltip title={tooltipTitle}>
-        <Box component="span" sx={containerSx}>
-          {content}
-        </Box>
-      </Tooltip>
-    ) : containerSx && Object.keys(containerSx).length > 0 ? (
-      <Box component="span" sx={containerSx}>
-        {content}
-      </Box>
-    ) : content;
-  }
-
-  const content = (
-    <>
-      <span className="task-link">
-        <span
-          className="task-expanded"
-          onMouseEnter={(e) => handleSegmentHover(e, resolvedId || label)}
-          onMouseLeave={handleSegmentLeave}
-        >
-        <Tooltip title={disabled || taskNotFound ? '' : (starredTasks?.includes(resolvedId || label) ? 'Remove from starred tasks' : 'Add to starred tasks')}>
-          <span>
-            <IconButton
-              size="small"
-              onClick={(e) => {
-                e.stopPropagation();
-                onToggleStar?.(resolvedId || label);
-              }}
-              disabled={disabled || taskNotFound}
-              sx={{ p: 0.5, color: 'inherit' }}
-            >
-              {starredTasks?.includes(resolvedId || label) ? <StarIcon sx={{ fontSize: 16 }} /> : <StarBorderIcon sx={{ fontSize: 16 }} />}
-            </IconButton>
-          </span>
-        </Tooltip>
-        {renderCompositeSegments()}
-        <Tooltip title={disabled || taskNotFound ? '' : "Run this task"}>
-          <span>
-            <IconButton
-              size="small"
-              onClick={() => {
-                handleSegmentLeave(); // Close popover before running
-                onRun(resolvedId || label);
-              }}
-              disabled={disabled || taskNotFound}
-              sx={{ p: 0.5, ml: 0.5 }}
-            >
-              <PlayArrowIcon sx={{ fontSize: 16 }} />
-            </IconButton>
-          </span>
-        </Tooltip>
-      </span>
-    </span>
-    {!taskNotFound && popoverAnchor && popoverContent && (
       <Popover
         open={Boolean(popoverAnchor)}
         anchorEl={popoverAnchor}
         onClose={handleSegmentLeave}
-        anchorOrigin={{
-          vertical: 'bottom',
-          horizontal: 'center',
-        }}
-        transformOrigin={{
-          vertical: 'top',
-          horizontal: 'center',
-        }}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+        transformOrigin={{ vertical: 'top', horizontal: 'center' }}
         sx={{ pointerEvents: 'none' }}
       >
         <Box sx={{ p: 1.5, minWidth: 220 }}>
@@ -762,7 +336,236 @@ function TaskLink({ label, taskId, displayLabel, disabled = false }) {
           )}
         </Box>
       </Popover>
-    )}
+    );
+  };
+
+  const tooltipTitle = taskNotFound ? 'Task not found' : '';
+  const containerSx = taskNotFound 
+    ? { opacity: 0.8 }
+    : disabled 
+    ? { 
+        backgroundColor: 'var(--vscode-input-background)',
+        color: 'var(--vscode-descriptionForeground)',
+        opacity: 0.6,
+        cursor: 'not-allowed'
+      }
+    : {};
+
+  // --- Running / Failed state ---
+  if (isRunning || isFailed) {
+    const content = (
+      <>
+        <div className="task-link running">
+          <div 
+            className={`task-pill ${hasDependencies ? '' : getBackgroundClass()}`} 
+            style={getProgressStyle()}
+          >
+          <Tooltip title={disabled || taskNotFound ? '' : (starredTasks?.includes(resolvedId || label) ? 'Remove from starred tasks' : 'Add to starred tasks')}>
+            <span>
+              <IconButton
+                size="small"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onToggleStar?.(resolvedId || label);
+                }}
+                disabled={disabled || taskNotFound}
+                sx={{ p: 0.5, color: 'inherit' }}
+              >
+                {starredTasks?.includes(resolvedId || label) ? <StarIcon sx={{ fontSize: 16 }} /> : <StarBorderIcon sx={{ fontSize: 16 }} />}
+              </IconButton>
+            </span>
+          </Tooltip>
+          
+          {hasDependencies ? (
+            <div className="segment-tree-container">
+              <Segment
+                task={rootTaskNode}
+                getSegmentState={getSegmentState}
+                getProgressInfo={getProgressInfo}
+                getDisplayLabel={getSegmentDisplayLabel}
+                onSegmentHover={handleSegmentHover}
+                onSegmentLeave={handleSegmentLeave}
+                onOpenDefinition={onOpenDefinition}
+                disabled={disabled || taskNotFound}
+                isRoot
+              />
+            </div>
+          ) : (
+            <span
+              className="task-label"
+              onDoubleClick={disabled || taskNotFound ? undefined : () => onOpenDefinition(resolvedId || label)}
+              onMouseEnter={(e) => handleSegmentHover(e, resolvedId || label)}
+              onMouseLeave={handleSegmentLeave}
+              title={disabled || taskNotFound ? undefined : "Double-click to open task definition"}
+            >
+              {isNpmTask && (
+                <Chip
+                  label="npm"
+                  size="small"
+                  sx={{
+                    height: 18,
+                    fontSize: '10px',
+                    fontWeight: 600,
+                    marginRight: '6px',
+                    backgroundColor: getNpmColor(currentTask?.definition?.path),
+                    color: 'var(--vscode-button-foreground)',
+                    '& .MuiChip-label': { padding: '0 6px' }
+                  }}
+                />
+              )}
+              {displayText}
+            </span>
+          )}
+
+          {isFailed ? (
+            <>
+              <Tooltip title={disabled || taskNotFound ? '' : "Retry this task"}>
+                <span>
+                  <IconButton
+                    size="small"
+                    onClick={() => {
+                      handleSegmentLeave();
+                      onRun(resolvedId || label);
+                    }}
+                    disabled={disabled || taskNotFound}
+                    sx={{ p: 0.5, ml: 0.5 }}
+                  >
+                    <PlayArrowIcon sx={{ fontSize: 16 }} />
+                  </IconButton>
+                </span>
+              </Tooltip>
+            </>
+          ) : (
+            <>
+              <span className="runtime" title={`Running for ${formatRuntime(runtime)}`}>{formatRuntime(runtime)}</span>
+              <Tooltip title={disabled || taskNotFound ? '' : (canFocus ? "Show terminal output for this task" : "Terminal not available")}>
+                <span>
+                  <IconButton
+                    size="small"
+                    onClick={() => onFocus(resolvedId || label)}
+                    disabled={!canFocus || disabled || taskNotFound}
+                    sx={{ p: 0.5, ml: 0.5 }}
+                  >
+                    <BoltIcon sx={{ fontSize: 16 }} />
+                  </IconButton>
+                </span>
+              </Tooltip>
+              <Tooltip title={taskNotFound ? '' : (canStop ? "Stop this task" : "Cannot stop task")}>
+                <span>
+                  <IconButton
+                    size="small"
+                    onClick={() => {
+                      handleSegmentLeave();
+                      onStop(resolvedId || label);
+                    }}
+                    disabled={!canStop || taskNotFound}
+                    sx={{ p: 0.5 }}
+                  >
+                    <StopIcon sx={{ fontSize: 16 }} />
+                  </IconButton>
+                </span>
+              </Tooltip>
+            </>
+          )}
+        </div>
+      </div>
+      {renderPopover()}
+    </>
+    );
+    
+    return tooltipTitle ? (
+      <Tooltip title={tooltipTitle}>
+        <Box component="span" sx={containerSx}>
+          {content}
+        </Box>
+      </Tooltip>
+    ) : containerSx && Object.keys(containerSx).length > 0 ? (
+      <Box component="span" sx={containerSx}>
+        {content}
+      </Box>
+    ) : content;
+  }
+
+  // --- Idle state ---
+  const content = (
+    <>
+      <span className="task-link">
+        <span className="task-expanded">
+        <Tooltip title={disabled || taskNotFound ? '' : (starredTasks?.includes(resolvedId || label) ? 'Remove from starred tasks' : 'Add to starred tasks')}>
+          <span>
+            <IconButton
+              size="small"
+              onClick={(e) => {
+                e.stopPropagation();
+                onToggleStar?.(resolvedId || label);
+              }}
+              disabled={disabled || taskNotFound}
+              sx={{ p: 0.5, color: 'inherit' }}
+            >
+              {starredTasks?.includes(resolvedId || label) ? <StarIcon sx={{ fontSize: 16 }} /> : <StarBorderIcon sx={{ fontSize: 16 }} />}
+            </IconButton>
+          </span>
+        </Tooltip>
+
+        {hasDependencies ? (
+          <div className="segment-tree-container">
+            <Segment
+              task={rootTaskNode}
+              getSegmentState={getSegmentState}
+              getProgressInfo={getProgressInfo}
+              getDisplayLabel={getSegmentDisplayLabel}
+              onSegmentHover={handleSegmentHover}
+              onSegmentLeave={handleSegmentLeave}
+              onOpenDefinition={onOpenDefinition}
+              disabled={disabled || taskNotFound}
+              isRoot
+            />
+          </div>
+        ) : (
+          <span
+            className="task-label"
+            onDoubleClick={disabled || taskNotFound ? undefined : () => onOpenDefinition(resolvedId || label)}
+            onMouseEnter={(e) => handleSegmentHover(e, resolvedId || label)}
+            onMouseLeave={handleSegmentLeave}
+            title={disabled || taskNotFound ? undefined : "Double-click to open task definition"}
+          >
+            {isNpmTask && (
+              <Chip
+                label="npm"
+                size="small"
+                sx={{
+                  height: 18,
+                  fontSize: '10px',
+                  fontWeight: 600,
+                  marginRight: '6px',
+                  backgroundColor: getNpmColor(currentTask?.definition?.path),
+                  color: 'var(--vscode-button-foreground)',
+                  '& .MuiChip-label': { padding: '0 6px' }
+                }}
+              />
+            )}
+            {displayText}
+          </span>
+        )}
+
+        <Tooltip title={disabled || taskNotFound ? '' : "Run this task"}>
+          <span>
+            <IconButton
+              size="small"
+              onClick={() => {
+                handleSegmentLeave();
+                onRun(resolvedId || label);
+              }}
+              disabled={disabled || taskNotFound}
+              sx={{ p: 0.5, ml: 0.5 }}
+            >
+              <PlayArrowIcon sx={{ fontSize: 16 }} />
+            </IconButton>
+          </span>
+        </Tooltip>
+      </span>
+    </span>
+    {renderPopover()}
     </>
   );
   

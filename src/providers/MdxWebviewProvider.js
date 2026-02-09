@@ -13,6 +13,7 @@ class MdxWebviewProvider {
     this._taskFailures = new Map(); // Map<label, {exitCode, reason}>
     this._taskStates = new Map(); // Map<label, 'starting'|'running'|'stopping'|'stopped'|'failed'>
     this._stoppingTasks = new Set(); // Set<label> - tracks tasks currently being stopped to prevent circular dependencies
+    this._cancelledTasks = new Set(); // Set<label> - tasks cancelled by stopTask; handleTaskStarted/Ended will ignore them
     this._stateMutex = Promise.resolve(); // Async mutex for global state read-modify-write operations
     
     // Watch for task execution changes
@@ -232,6 +233,50 @@ class MdxWebviewProvider {
     return dep.label || dep.task || null;
   }
 
+  /**
+   * Resolve a task name to a VS Code Task object, following VS Code's own
+   * task-source precedence rules.
+   *
+   * ── VS Code Task Resolution Precedence ──────────────────────────────────
+   *
+   *   Workspace (tasks.json)  ALWAYS  takes precedence over auto-detected
+   *   tasks (npm, gulp, grunt, etc.) when both define the same name.
+   *
+   *   Example with a "compile" task defined in BOTH tasks.json and package.json:
+   *     "compile"       → resolves to the tasks.json (Workspace) definition
+   *     "npm: compile"  → resolves to the package.json (npm) definition
+   *
+   *   If tasks.json does NOT define "compile":
+   *     "compile"       → resolves to the package.json (npm) definition
+   *     "npm: compile"  → resolves to the package.json (npm) definition
+   *
+   * ── Why this matters ───────────────────────────────────────────────────
+   *
+   *   vscode.tasks.fetchTasks() returns tasks from ALL providers (Workspace,
+   *   npm, etc.) in arbitrary order. A bare `tasks.find(t => t.name === name)`
+   *   picks whichever comes first — often the npm variant.
+   *
+   *   Task IDs use the format "Source|Name" (e.g. "Workspace|compile" vs
+   *   "npm|compile"). When dependency registration picks "npm|compile" but
+   *   VS Code's runner actually executes "Workspace|compile", the hierarchy
+   *   lookup in handleTaskStarted fails to match — causing the parent task
+   *   to never be recognized as running (e.g. no Stop button on the
+   *   TaskLink for "test:ci" when its first dependency is "compile").
+   *
+   * ── Canonical implementations of this same rule ────────────────────────
+   *
+   *   @see sendTasksToWebview — tasksByLabel map with Workspace preference
+   *   @see TaskLink.jsx — getTaskInfo with matching.find(t => t.source === 'Workspace')
+   *
+   * @param {import('vscode').Task[]} tasks - Array from vscode.tasks.fetchTasks()
+   * @param {string} name - The task name/label to resolve
+   * @returns {import('vscode').Task | null} The resolved task, or null if not found
+   */
+  _resolveTaskByName(tasks, name) {
+    const matching = tasks.filter(t => t.name === name);
+    return matching.find(t => t.source === 'Workspace') || matching[0] || null;
+  }
+
   async registerTaskDependencies(taskId) {
     const tasks = await vscode.tasks.fetchTasks();
     const task = tasks.find(t => this.getTaskId(t) === taskId);
@@ -244,8 +289,7 @@ class MdxWebviewProvider {
     dependencies.forEach(dep => {
       const depName = this.normalizeDependencyLabel(dep);
       if (depName) {
-        // Resolve dependency name to ID using first match (VS Code behavior)
-        const depTask = tasks.find(t => t.name === depName);
+        const depTask = this._resolveTaskByName(tasks, depName);
         if (depTask) {
           const depId = this.getTaskId(depTask);
           if (depId !== taskId) {
@@ -257,6 +301,80 @@ class MdxWebviewProvider {
     });
 
     return depIds;
+  }
+
+  // Discover parent tasks for a given task ID by checking both active task
+  // executions and all workspace tasks. When a task is started as a dependency
+  // (e.g. via VS Code's native task runner or command palette), the parent-child
+  // hierarchy is not pre-populated by runTask(). This method finds any parent
+  // that lists the given task as a dependency and registers the relationship so
+  // that ensureParentRunning can make the parent visible in the UI immediately.
+  async discoverParentTasks(taskId) {
+    // If already registered as a subtask of some parent, nothing to discover
+    let alreadyHasParent = false;
+    this._taskHierarchy.forEach((subtasks) => {
+      if (subtasks.has(taskId)) alreadyHasParent = true;
+    });
+    if (alreadyHasParent) return;
+
+    // Extract the task name from the ID (format: "Source|Name")
+    const taskName = taskId.includes('|') ? taskId.split('|')[1] : taskId;
+
+    // Build a set of task IDs that have active VS Code executions.
+    // taskExecutions includes parent tasks whose process hasn't started yet
+    // (i.e. still waiting for dependsOn dependencies to complete).
+    const activeExecutions = vscode.tasks.taskExecutions || [];
+    const activeIds = new Set();
+    for (const exec of activeExecutions) {
+      activeIds.add(this.getTaskId(exec.task));
+    }
+
+    // Scan ALL workspace tasks to find any that list our task as a dependency
+    const allTasks = await vscode.tasks.fetchTasks();
+
+    for (const candidateTask of allTasks) {
+      const candidateId = this.getTaskId(candidateTask);
+
+      // Skip self
+      if (candidateId === taskId) continue;
+
+      // Skip if this candidate is already tracking our task
+      const existingChildren = this._taskHierarchy.get(candidateId);
+      if (existingChildren && existingChildren.has(taskId)) continue;
+
+      // Only consider candidates that have an active VS Code execution
+      if (!activeIds.has(candidateId)) continue;
+
+      // Check if this candidate lists our task as a dependency
+      const depInfo = await this.getTaskDependencyInfo(candidateTask);
+      const depNames = (depInfo.dependsOn || []).map(d => this.normalizeDependencyLabel(d)).filter(Boolean);
+
+      if (depNames.includes(taskName)) {
+        this._logger.info(`Discovered parent task "${candidateId}" for "${taskId}" (via active executions)`);
+
+        // Store the actual VS Code TaskExecution for the parent so stopTask
+        // can terminate it later (the parent's process may not have started
+        // yet, but VS Code's execution handle can still terminate the chain).
+        const parentExec = activeExecutions.find(e => this.getTaskId(e.task) === candidateId);
+        if (parentExec && !this._runningTasks.has(candidateId)) {
+          this._runningTasks.set(candidateId, parentExec);
+        }
+
+        // Register ALL of this parent's dependencies (not just ours)
+        for (const depName of depNames) {
+          const depTask = this._resolveTaskByName(allTasks, depName);
+          if (depTask) {
+            const depId = this.getTaskId(depTask);
+            if (depId !== candidateId) {
+              this.addSubtask(candidateId, depId);
+            }
+          }
+        }
+
+        // Also register the parent's own dependencies recursively
+        await this.registerTaskDependencies(candidateId);
+      }
+    }
   }
 
   async ensureParentRunning(parentId) {
@@ -402,6 +520,18 @@ class MdxWebviewProvider {
     // Restore state for running tasks when webview reconnects
     this.restoreRunningTasksState();
 
+    // When the webview becomes visible again after being hidden, the JS
+    // context may have been disposed (retainContextWhenHidden is not set).
+    // The new context will send a 'ready' message which triggers a full
+    // restore. However, if any messages were posted while the webview was
+    // hidden they are lost. Re-push running/failed task state as a safety
+    // net so the UI is always up-to-date when the panel is shown.
+    webviewView.onDidChangeVisibility(() => {
+      if (webviewView.visible) {
+        this.restoreRunningTasksState();
+      }
+    });
+
     // Handle messages from the webview
     webviewView.webview.onDidReceiveMessage(async (message) => {
       switch (message.type) {
@@ -409,6 +539,7 @@ class MdxWebviewProvider {
           await this.loadDefaultMdx();
           await this.restoreNavigationState();
           await this.sendTasksToWebview();
+          await this.restoreRunningTasksState();
           break;
         case 'navigate':
           await this.loadMdxFile(message.file);
@@ -763,14 +894,61 @@ class MdxWebviewProvider {
         detail: task.detail || '',
         source: task.source,
         definition: definition, // Include definition for script names and paths
-        dependsOn: dependencyInfo.dependsOn, // Note: these are currently names, not IDs
+        dependsOn: dependencyInfo.dependsOn, // flat names for tree resolution below
         dependsOrder: dependencyInfo.dependsOrder
       };
     }));
 
+    // Build a lookup map by label for recursive tree resolution
+    const tasksByLabel = new Map();
+    for (const t of taskList) {
+      // Prefer Workspace tasks over npm when labels collide (VS Code convention)
+      if (!tasksByLabel.has(t.label) || t.source === 'Workspace') {
+        tasksByLabel.set(t.label, t);
+      }
+    }
+
+    // Recursively resolve dependsOn from flat label strings into tree nodes
+    const resolveDependencyTree = (depLabels, visited = new Set()) => {
+      if (!depLabels || depLabels.length === 0) return [];
+      return depLabels.map(depLabel => {
+        const normalizedLabel = this.normalizeDependencyLabel(depLabel);
+        if (!normalizedLabel) return { label: depLabel, id: null, dependsOn: [], dependsOrder: 'parallel' };
+
+        // Cycle detection
+        if (visited.has(normalizedLabel)) {
+          return { label: normalizedLabel, id: null, dependsOn: [], dependsOrder: 'parallel', cycle: true };
+        }
+        visited.add(normalizedLabel);
+
+        const resolved = tasksByLabel.get(normalizedLabel);
+        if (!resolved) {
+          return { label: normalizedLabel, id: null, dependsOn: [], dependsOrder: 'parallel' };
+        }
+
+        // Recurse into this dependency's own dependsOn
+        const childDeps = resolveDependencyTree(resolved.dependsOn, new Set(visited));
+
+        return {
+          label: resolved.label,
+          id: resolved.id,
+          source: resolved.source,
+          definition: resolved.definition,
+          dependsOn: childDeps,
+          dependsOrder: resolved.dependsOrder || 'parallel'
+        };
+      });
+    };
+
+    // Replace flat dependsOn with recursive tree on each task
+    const enrichedTaskList = taskList.map(t => ({
+      ...t,
+      dependsOn: resolveDependencyTree(t.dependsOn)
+    }));
+
     this._view?.webview.postMessage({
       type: 'updateTasks',
-      tasks: taskList
+      tasks: enrichedTaskList
     });
   }
 
@@ -848,7 +1026,7 @@ class MdxWebviewProvider {
     
     // 2. Try Name match (Legacy)
     if (!task) {
-      task = tasks.find(t => t.name === labelOrId);
+      task = this._resolveTaskByName(tasks, labelOrId);
     }
     
     // 3. Try "npm: name" match (Legacy MDX)
@@ -859,7 +1037,32 @@ class MdxWebviewProvider {
 
     if (task) {
       const taskId = this.getTaskId(task);
-      // Clear any persisted failure when re-running
+
+      // Clear ALL stale in-memory state before re-run.
+      // When a task is stopped via stopTask(), its children are added to
+      // _cancelledTasks so their end-events are ignored. If handleTaskEnded
+      // doesn't fire (race with terminal disposal), those entries become
+      // orphaned. On restart, handleTaskStarted would see the stale entry
+      // and bail out — suppressing UI updates (no Stop button, no state
+      // change). Clearing everything here guarantees a clean slate.
+      const previousChildren = this._taskHierarchy.get(taskId);
+      if (previousChildren) {
+        for (const childId of previousChildren) {
+          this._cancelledTasks.delete(childId);
+          this._taskStates.delete(childId);
+          this._taskStartTimes.delete(childId);
+          this._taskFailures.delete(childId);
+          this._stoppingTasks.delete(childId);
+        }
+      }
+      this._cancelledTasks.delete(taskId);
+      this._taskHierarchy.delete(taskId);
+      this._taskStates.delete(taskId);
+      this._taskStartTimes.delete(taskId);
+      this._taskFailures.delete(taskId);
+      this._stoppingTasks.delete(taskId);
+
+      // Clear persisted failure record
       await this.clearFailedTask(taskId);
 
       // Check if task has dependencies
@@ -871,8 +1074,7 @@ class MdxWebviewProvider {
         dependencies.forEach(dep => {
           const depName = this.normalizeDependencyLabel(dep);
           if (depName) {
-            // Resolve dependency name to ID using first match
-            const depTask = tasks.find(t => t.name === depName);
+            const depTask = this._resolveTaskByName(tasks, depName);
             if (depTask) {
               const depId = this.getTaskId(depTask);
               if (depId !== taskId) {
@@ -902,12 +1104,12 @@ class MdxWebviewProvider {
        // If it doesn't look like an ID (no pipe), try to find it
        if (!taskId.includes('|')) {
          const tasks = await vscode.tasks.fetchTasks();
-         const task = tasks.find(t => t.name === taskId);
+         const task = this._resolveTaskByName(tasks, taskId);
          if (task) taskId = this.getTaskId(task);
        }
     }
 
-    const execution = this._runningTasks.get(taskId);
+    let execution = this._runningTasks.get(taskId);
     const state = this._taskStates.get(taskId);
     const children = this.getTaskHierarchy(taskId);
     
@@ -935,109 +1137,143 @@ class MdxWebviewProvider {
       canStop: false,
       canFocus: false
     });
-    
-    // Recursively stop all child tasks in parallel (faster termination)
-    if (children && children.length > 0) {
-      this._logger.info(`Stopping ${children.length} child task(s) of "${taskId}"...`);
+
+    // If we have no real execution (proxy parent), try to find it from VS Code
+    if (!execution) {
       try {
-        await Promise.all(children.map(childId => this.stopTask(childId)));
-        
-        // Clean up taskHierarchy after children are stopped
-        for (const childId of children) {
-          this.removeSubtask(taskId, childId);
+        const activeExecutions = vscode.tasks.taskExecutions || [];
+        const match = activeExecutions.find(e => this.getTaskId(e.task) === taskId);
+        if (match) {
+          execution = match;
+          this._logger.info(`Found real VS Code execution for proxy parent "${taskId}"`);
         }
       } catch (error) {
-        this._logger.warn(`Error stopping children of task ${taskId}:`, error);
+        this._logger.warn(`Failed to look up execution for ${taskId}:`, error);
       }
     }
     
+    // Recursively collect ALL descendants (children, grandchildren, etc.)
+    // so that deeply nested trees are fully stopped.
+    const allDescendants = [];
+    const collectDescendants = (parentId) => {
+      const kids = this._taskHierarchy.get(parentId);
+      if (!kids) return;
+      for (const childId of kids) {
+        if (!allDescendants.includes(childId)) {
+          allDescendants.push(childId);
+          collectDescendants(childId); // recurse into grandchildren
+        }
+      }
+    };
+    collectDescendants(taskId);
+
+    // Build a set of all task names involved (root + descendants) for terminal matching later
+    const allTaskNames = new Set();
+    const rootName = taskId.includes('|') ? taskId.split('|')[1] : taskId;
+    allTaskNames.add(rootName);
+
+    // Phase 1: Cancel all descendants and terminate their executions via API
+    if (allDescendants.length > 0) {
+      this._logger.info(`Stopping ${allDescendants.length} descendant task(s) of "${taskId}"...`);
+
+      // Snapshot VS Code active executions once (avoid repeated lookups)
+      let activeExecutions = [];
+      try {
+        activeExecutions = vscode.tasks.taskExecutions || [];
+      } catch (e) { /* ignore */ }
+
+      for (const descId of allDescendants) {
+        // Add to cancelled set so future VS Code events for this task are ignored
+        this._cancelledTasks.add(descId);
+
+        // Collect name for terminal sweep
+        const descName = descId.includes('|') ? descId.split('|')[1] : descId;
+        allTaskNames.add(descName);
+
+        // Terminate via stored execution handle
+        const descExec = this._runningTasks.get(descId);
+        if (descExec) {
+          try {
+            descExec.terminate();
+            this._logger.info(`Terminated descendant execution "${descId}"`);
+          } catch (e) {
+            this._logger.warn(`Failed to terminate descendant ${descId}:`, e);
+          }
+        } else {
+          // Fallback: look up in VS Code's active executions
+          const match = activeExecutions.find(e => this.getTaskId(e.task) === descId);
+          if (match) {
+            try {
+              match.terminate();
+              this._logger.info(`Terminated descendant execution "${descId}" (from VS Code taskExecutions)`);
+            } catch (e) {
+              this._logger.warn(`Failed to terminate descendant ${descId} from taskExecutions:`, e);
+            }
+          }
+        }
+
+        // Clean up descendant tracking state
+        this._runningTasks.delete(descId);
+        this._taskStartTimes.delete(descId);
+        this._taskHierarchy.delete(descId);
+        this._taskStates.delete(descId);
+        this._taskFailures.delete(descId);
+        this._stoppingTasks.delete(descId);
+
+        // Notify webview that descendant is stopped
+        this._view?.webview.postMessage({
+          type: 'taskEnded',
+          taskLabel: descId,
+          exitCode: 130,
+          duration: 0,
+          subtasks: []
+        });
+      }
+
+      // Clean up root's hierarchy
+      this._taskHierarchy.delete(taskId);
+    }
+
+    // Phase 2: Terminate the root task itself via API
     let stopped = false;
-    
-    // Method 1: Try VS Code API terminate() - the standard way
     try {
       if (execution) {
         execution.terminate();
-        this._logger.info(`Method 1 (API terminate): Sent terminate signal to task "${taskId}"`);
+        this._logger.info(`API terminate: Sent terminate signal to task "${taskId}"`);
         stopped = true;
       }
     } catch (error) {
-      this._logger.warn(`Method 1 failed for task ${taskId}:`, error);
+      this._logger.warn(`API terminate failed for task ${taskId}:`, error);
     }
-    
-    // Extract task name for terminal matching (IDs are "Source|Name")
-    const taskName = taskId.includes('|') ? taskId.split('|')[1] : taskId;
 
-    // Method 2: Try to find and dispose the terminal
-    if (!stopped) {
-      try {
-        const terminals = vscode.window.terminals;
-        const terminal = terminals.find(t => 
-          t.name.includes(taskName) || 
-          t.name === 'Task - ' + taskName
-        );
-        
-        if (terminal) {
-          terminal.dispose();
-          this._logger.info(`Method 2 (terminal dispose): Disposed terminal for task "${taskName}"`);
-          stopped = true;
-        }
-      } catch (error) {
-        this._logger.warn(`Method 2 failed for task ${taskName}:`, error);
-      }
-    }
-    
-    // Method 3: Try to kill by process via terminal
-    if (!stopped) {
-      try {
-        const terminals = vscode.window.terminals;
-        const terminal = terminals.find(t => 
-          t.name.includes(taskName) || 
-          t.name === 'Task - ' + taskName
-        );
-        
-        if (terminal) {
-          // Send Ctrl+C signal to terminal
-          terminal.sendText('\x03');
-          this._logger.info(`Method 3 (Ctrl+C): Sent SIGINT to terminal for task "${taskName}"`);
-          
-          // Wait briefly then kill if still alive
-          setTimeout(() => {
-            if (vscode.window.terminals.includes(terminal)) {
-              terminal.dispose();
-              this._logger.info(`Method 3 (delayed dispose): Force disposed terminal for task "${taskName}"`);
-            }
-          }, 500);
-          
-          stopped = true;
-        }
-      } catch (error) {
-        this._logger.warn(`Method 3 failed for task ${taskName}:`, error);
-      }
-    }
-    
-    // Method 4: Force kill all terminals with similar name (nuclear option)
-    if (!stopped) {
+    // Phase 3: Single terminal sweep for root + all descendants.
+    // Instead of running 5 fallback methods per node, we do one pass over
+    // all terminals and dispose any that match the task tree.
+    if (!stopped || allDescendants.length > 0) {
       try {
         const terminals = vscode.window.terminals;
         let killedCount = 0;
-        
+
         terminals.forEach(terminal => {
-          if (terminal.name.toLowerCase().includes(taskName.toLowerCase())) {
-            try {
-              terminal.dispose();
-              killedCount++;
-            } catch (e) {
-              // Ignore individual failures
+          const tName = terminal.name.toLowerCase();
+          for (const taskName of allTaskNames) {
+            if (tName.includes(taskName.toLowerCase())) {
+              try {
+                terminal.sendText('\x03'); // Ctrl+C first for graceful shutdown
+                terminal.dispose();
+                killedCount++;
+              } catch (e) { /* ignore */ }
+              break; // don't double-dispose the same terminal
             }
           }
         });
-        
+
         if (killedCount > 0) {
-          this._logger.info(`Method 4 (force all): Disposed ${killedCount} terminal(s) for task "${taskName}"`);
+          this._logger.info(`Terminal sweep: Disposed ${killedCount} terminal(s) for task tree "${taskId}"`);
           stopped = true;
         }
       } catch (error) {
-        this._logger.warn(`Method 4 failed for task ${taskName}:`, error);
+        this._logger.warn(`Terminal sweep failed for task ${taskId}:`, error);
       }
     }
     
@@ -1047,6 +1283,15 @@ class MdxWebviewProvider {
     this._taskHierarchy.delete(taskId);
     this._taskStates.delete(taskId);
     this._stoppingTasks.delete(taskId); // Remove from stopping set
+
+    // Aggressively clear _cancelledTasks for all descendants.
+    // handleTaskEnded may not fire for every child (race with terminal
+    // disposal), leaving orphaned entries that would suppress
+    // handleTaskStarted on the next run. Clean them all now.
+    for (const descId of allDescendants) {
+      this._cancelledTasks.delete(descId);
+    }
+    this._cancelledTasks.delete(taskId);
     
     this._view?.webview.postMessage({
       type: 'taskStateChanged',
@@ -1116,7 +1361,7 @@ class MdxWebviewProvider {
       
       // Try label
       if (!task) {
-         task = tasks.find(t => t.name === labelOrId);
+         task = this._resolveTaskByName(tasks, labelOrId);
       }
 
       // Try legacy npm format
@@ -1201,6 +1446,14 @@ class MdxWebviewProvider {
       this._logger.warn(`Task "${taskId}" is already running, ignoring duplicate start event`);
       return;
     }
+
+    // Guard: skip if task was cancelled by stopTask (e.g., parent was stopped
+    // while this dependency hadn't started yet)
+    if (this._cancelledTasks.has(taskId)) {
+      this._logger.info(`Task "${taskId}" was cancelled, ignoring start event`);
+      this._cancelledTasks.delete(taskId);
+      return;
+    }
     
     const startTime = Date.now();
     this._logger.info(`Task started: "${taskId}"`);
@@ -1218,6 +1471,16 @@ class MdxWebviewProvider {
       await this.registerTaskDependencies(taskId);
     } catch (error) {
       this._logger.warn(`Failed to register dependencies for task ${taskId}:`, error);
+    }
+
+    // Discover parent tasks: if this task was started as a dependency of another
+    // task (e.g. via VS Code's native task runner), the hierarchy may not be
+    // populated yet. Scan active task executions to find parents that list this
+    // task as a dependency and register the relationship.
+    try {
+      await this.discoverParentTasks(taskId);
+    } catch (error) {
+      this._logger.warn(`Failed to discover parent tasks for ${taskId}:`, error);
     }
 
     // Check if this task is a subtask of any running task
@@ -1257,9 +1520,18 @@ class MdxWebviewProvider {
     const taskId = this.getTaskId(event.execution.task);
     const currentState = this._taskStates.get(taskId);
     
-    // Guard: skip if task was already stopped (e.g., via stopTask) or has no state
-    if (currentState === 'stopped') {
-      this._logger.warn(`Task "${taskId}" is already stopped, ignoring duplicate end event`);
+    // Guard: skip if task was already stopped (e.g., via stopTask) or has no state.
+    // When a parent task is stopped, its children are added to _cancelledTasks so
+    // that VS Code's subsequent onDidEndTaskProcess events are ignored.
+    if (currentState === 'stopped' || currentState === 'stopping' || this._cancelledTasks.has(taskId)) {
+      this._logger.info(`Task "${taskId}" is already ${currentState || 'cancelled'}, ignoring end event`);
+      // Clean up any remaining state
+      this._runningTasks.delete(taskId);
+      this._taskStartTimes.delete(taskId);
+      this._taskHierarchy.delete(taskId);
+      this._taskStates.delete(taskId);
+      this._taskFailures.delete(taskId);
+      this._cancelledTasks.delete(taskId);
       return;
     }
     

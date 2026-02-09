@@ -60,7 +60,7 @@ export const sampleTasks = [
 ];
 
 /**
- * Task with sequential dependencies
+ * Task with sequential dependencies (tree-shaped dependsOn)
  */
 export const taskWithDependencies = {
   id: 'shell|deploy|/workspaces/ControlPanel',
@@ -72,12 +72,15 @@ export const taskWithDependencies = {
     command: 'echo deploy',
     label: 'deploy'
   },
-  dependsOn: ['build', 'test'],
+  dependsOn: [
+    { label: 'build', id: 'shell|build|/workspaces/ControlPanel', source: 'Workspace', definition: { type: 'shell', command: 'webpack --mode production', label: 'build' }, dependsOn: [], dependsOrder: 'parallel' },
+    { label: 'test', id: 'shell|test|/workspaces/ControlPanel', source: 'Workspace', definition: { type: 'shell', command: 'npm test', label: 'test' }, dependsOn: [], dependsOrder: 'parallel' }
+  ],
   dependsOrder: 'sequence'
 };
 
 /**
- * Task with parallel dependencies
+ * Task with parallel dependencies (tree-shaped dependsOn)
  */
 export const taskWithParallelDeps = {
   id: 'shell|ci|/workspaces/ControlPanel',
@@ -89,7 +92,10 @@ export const taskWithParallelDeps = {
     command: 'echo ci',
     label: 'ci'
   },
-  dependsOn: ['lint', 'test'],
+  dependsOn: [
+    { label: 'lint', id: 'shell|lint|/workspaces/ControlPanel', source: 'Workspace', definition: { type: 'shell', command: 'eslint .', label: 'lint' }, dependsOn: [], dependsOrder: 'parallel' },
+    { label: 'test', id: 'shell|test|/workspaces/ControlPanel', source: 'Workspace', definition: { type: 'shell', command: 'npm test', label: 'test' }, dependsOn: [], dependsOrder: 'parallel' }
+  ],
   dependsOrder: 'parallel'
 };
 
@@ -255,7 +261,7 @@ export function createMockTask(label, options = {}) {
       label,
       ...options.definition
     },
-    dependsOn: options.dependsOn || [],
+    dependsOn: options.dependsOn || [],  // tree-shaped: array of { label, id, source, definition, dependsOn, dependsOrder }
     dependsOrder: options.dependsOrder
   };
 }
@@ -280,6 +286,103 @@ export function createRunningTaskState(taskLabel, options = {}) {
     canFocus: options.canFocus !== undefined ? options.canFocus : true
   };
 }
+
+/**
+ * Helper to create a dependency tree node (for dependsOn arrays)
+ */
+export function createDepNode(label, options = {}) {
+  const source = options.source || 'Workspace';
+  const type = options.type || 'shell';
+  return {
+    label,
+    id: options.id || `${type}|${label}|/workspaces/ControlPanel`,
+    source,
+    definition: {
+      type,
+      command: options.command || `echo ${label}`,
+      script: options.script,
+      path: options.path,
+      label,
+      ...options.definition
+    },
+    dependsOn: options.dependsOn || [],
+    dependsOrder: options.dependsOrder || 'parallel'
+  };
+}
+
+/**
+ * 3-level nested parallel dependency tree:
+ * pipeline → [stage-1, stage-2]
+ *   stage-1 → [s1-lint, s1-types, s1-format]  (parallel)
+ *   stage-2 → [s2-unit, s2-e2e]               (parallel)
+ */
+export const nestedParallelTree = createMockTask('pipeline', {
+  dependsOn: [
+    createDepNode('stage-1', {
+      dependsOn: [
+        createDepNode('s1-lint'),
+        createDepNode('s1-types'),
+        createDepNode('s1-format')
+      ],
+      dependsOrder: 'parallel'
+    }),
+    createDepNode('stage-2', {
+      dependsOn: [
+        createDepNode('s2-unit'),
+        createDepNode('s2-e2e')
+      ],
+      dependsOrder: 'parallel'
+    })
+  ],
+  dependsOrder: 'parallel'
+});
+
+/**
+ * 3-level nested sequential dependency chain:
+ * deploy → [build, lint, test] all sequential
+ *   build → [compile, bundle] sequential
+ */
+export const nestedSequentialChain = createMockTask('deploy', {
+  dependsOn: [
+    createDepNode('build', {
+      dependsOn: [
+        createDepNode('compile'),
+        createDepNode('bundle')
+      ],
+      dependsOrder: 'sequence'
+    }),
+    createDepNode('lint'),
+    createDepNode('test')
+  ],
+  dependsOrder: 'sequence'
+});
+
+/**
+ * Mixed nested: parallel parent, stage-1 parallel children, stage-2 sequential children
+ * pipeline → [stage-1 (parallel), stage-2 (sequential)]
+ *   stage-1 → [s1-lint, s1-format]  (parallel)
+ *   stage-2 → [s2-unit, s2-e2e]     (sequential)
+ */
+export const nestedMixedTree = createMockTask('pipeline', {
+  id: 'shell|pipeline-mixed|/workspaces/ControlPanel',
+  dependsOn: [
+    createDepNode('stage-1', {
+      dependsOn: [
+        createDepNode('s1-lint'),
+        createDepNode('s1-format')
+      ],
+      dependsOrder: 'parallel'
+    }),
+    createDepNode('stage-2', {
+      dependsOn: [
+        createDepNode('s2-unit'),
+        createDepNode('s2-e2e')
+      ],
+      dependsOrder: 'sequence'
+    })
+  ],
+  dependsOrder: 'parallel'
+});
 
 /**
  * Log buffer entries for debug panel testing

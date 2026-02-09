@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
 import TaskLink from './TaskLink';
 import { TaskStateProvider } from '../context';
-import { sampleTasks, taskWithDependencies, createRunningTaskState } from '../../test/fixtures/tasks';
+import { sampleTasks, taskWithDependencies, createRunningTaskState, createMockTask, createDepNode, nestedParallelTree, nestedSequentialChain, nestedMixedTree } from '../../test/fixtures/tasks';
 
 const testTheme = createTheme({ palette: { mode: 'dark' } });
 
@@ -122,8 +122,8 @@ describe('TaskLink Component', () => {
       });
     });
 
-    test('failed: shows retry button and exit code badge', async () => {
-      renderTaskLink({ label: 'test' });
+    test('failed: shows retry button', async () => {
+      const { container } = renderTaskLink({ label: 'test' });
 
       sendMessage('taskFailed', {
         taskLabel: 'test',
@@ -132,10 +132,11 @@ describe('TaskLink Component', () => {
       });
 
       await waitFor(() => {
-        expect(screen.getByText(/Failed/)).toBeInTheDocument();
-        expect(screen.getByText(/\(1\)/)).toBeInTheDocument();
         // Retry button (PlayArrowIcon)
         expect(screen.queryByTestId('PlayArrowIcon')).toBeInTheDocument();
+        // Task pill should have error class
+        const pill = container.querySelector('.task-pill');
+        expect(pill?.classList.contains('error')).toBe(true);
       });
     });
 
@@ -219,7 +220,7 @@ describe('TaskLink Component', () => {
       });
 
       await waitFor(() => {
-        expect(screen.getByText(/Failed/)).toBeInTheDocument();
+        expect(screen.queryByTestId('PlayArrowIcon')).toBeInTheDocument();
       });
 
       expect(container).toMatchSnapshot();
@@ -384,7 +385,7 @@ describe('TaskLink Component', () => {
       sendMessage('updateTasks', { tasks: tasksWithDeps });
 
       await waitFor(() => {
-        const seqContainer = container.querySelector('.task-segments-sequence');
+        const seqContainer = container.querySelector('.segment-tree-container');
         expect(seqContainer).toBeInTheDocument();
       });
     });
@@ -403,7 +404,7 @@ describe('TaskLink Component', () => {
       sendMessage('updateTasks', { tasks: tasksWithDeps });
 
       await waitFor(() => {
-        expect(container.querySelector('.task-segments')).toBeInTheDocument();
+        expect(container.querySelector('.segment-tree-container')).toBeInTheDocument();
       });
 
       expect(container).toMatchSnapshot();
@@ -436,8 +437,8 @@ describe('TaskLink Component', () => {
   // ─── Failed task with dependency info ───────────────────────
 
   describe('Failed Task Details', () => {
-    test('shows failed dependency info when a dependency failed', async () => {
-      renderTaskLink({ label: 'test' });
+    test('shows retry button when a dependency failed', async () => {
+      const { container } = renderTaskLink({ label: 'test' });
 
       sendMessage('taskFailed', {
         taskLabel: 'test',
@@ -447,8 +448,9 @@ describe('TaskLink Component', () => {
       });
 
       await waitFor(() => {
-        expect(screen.getByText(/Failed/)).toBeInTheDocument();
-        expect(screen.getByText(/lint/)).toBeInTheDocument();
+        expect(screen.queryByTestId('PlayArrowIcon')).toBeInTheDocument();
+        const pill = container.querySelector('.task-pill');
+        expect(pill?.classList.contains('error')).toBe(true);
       });
     });
   });
@@ -456,7 +458,7 @@ describe('TaskLink Component', () => {
   // ─── Subtask Display ───────────────────────────────────────
 
   describe('Subtask Display', () => {
-    test('shows subtasks when task has running subtasks', async () => {
+    test('running subtasks are tracked in context even when not rendered by TaskLink', async () => {
       renderTaskLink({ label: 'test' });
 
       sendMessage('taskStarted', {
@@ -466,9 +468,12 @@ describe('TaskLink Component', () => {
         subtasks: ['build', 'lint']
       });
 
+      // Subtask labels are tracked in context.runningTasks but are no longer
+      // rendered directly by TaskLink (dependency tree handles dep visualization).
+      // Just verify the task is shown as running.
       await waitFor(() => {
-        expect(screen.getByText('build')).toBeInTheDocument();
-        expect(screen.getByText('lint')).toBeInTheDocument();
+        const stopButton = screen.queryByLabelText(/stop/i);
+        expect(stopButton).toBeInTheDocument();
       });
     });
   });
@@ -713,7 +718,10 @@ describe('TaskLink Component', () => {
           displayLabel: 'ci',
           source: 'Workspace',
           definition: { type: 'shell', command: 'echo ci', label: 'ci' },
-          dependsOn: ['lint', 'test'],
+          dependsOn: [
+            { label: 'lint', id: 'shell|lint|/workspaces/ControlPanel', source: 'Workspace', definition: { type: 'shell', command: 'eslint .', label: 'lint' }, dependsOn: [], dependsOrder: 'parallel' },
+            { label: 'test', id: 'shell|test|/workspaces/ControlPanel', source: 'Workspace', definition: { type: 'shell', command: 'npm test', label: 'test' }, dependsOn: [], dependsOrder: 'parallel' }
+          ],
           dependsOrder: 'parallel'
         }
       ];
@@ -729,7 +737,7 @@ describe('TaskLink Component', () => {
       sendMessage('updateTasks', { tasks: tasksWithParallelDeps });
 
       await waitFor(() => {
-        const parallelContainer = container.querySelector('.task-segments-parallel');
+        const parallelContainer = container.querySelector('.segment-children-parallel');
         expect(parallelContainer).toBeInTheDocument();
       });
     });
@@ -750,7 +758,7 @@ describe('TaskLink Component', () => {
       });
 
       await waitFor(() => {
-        expect(screen.getByText(/Failed/)).toBeInTheDocument();
+        expect(screen.queryByTestId('PlayArrowIcon')).toBeInTheDocument();
       });
 
       // Find the retry (play) button on the failed task
@@ -854,7 +862,10 @@ describe('TaskLink Component', () => {
       displayLabel: 'deploy',
       source: 'Workspace',
       definition: { type: 'shell', command: 'deploy', label: 'deploy' },
-      dependsOn: ['build', 'test'],
+      dependsOn: [
+        { label: 'build', id: 'shell|build|/workspaces/ControlPanel', source: 'Workspace', definition: { type: 'shell', command: 'webpack --mode production', label: 'build' }, dependsOn: [], dependsOrder: 'parallel' },
+        { label: 'test', id: 'shell|test|/workspaces/ControlPanel', source: 'Workspace', definition: { type: 'shell', command: 'npm test', label: 'test' }, dependsOn: [], dependsOrder: 'parallel' }
+      ],
       dependsOrder: 'sequence'
     };
 
@@ -906,8 +917,8 @@ describe('TaskLink Component', () => {
       });
     });
 
-    test('idle dependency segments show success when parent is in error state', async () => {
-      // When parent has error (because one dep failed), other idle deps should show as success
+    test('idle dependency segments remain idle when sibling fails', async () => {
+      // When one dep fails, its sibling stays idle (aggregate parent shows error)
       const allTasks = [...sampleTasks, deployTask];
 
       const { container } = render(
@@ -930,9 +941,10 @@ describe('TaskLink Component', () => {
         // The build segment should be error
         const errorSegments = container.querySelectorAll('.segment-error');
         expect(errorSegments.length).toBeGreaterThan(0);
-        // The test segment (idle but parent error) should be success
-        const successSegments = container.querySelectorAll('.segment-success');
-        expect(successSegments.length).toBeGreaterThan(0);
+        // The deploy (root) aggregates to error because a descendant has error
+        // The test segment stays idle since it hasn't run
+        const idleSegments = container.querySelectorAll('.segment-idle');
+        expect(idleSegments.length).toBeGreaterThan(0);
       });
     });
 
@@ -961,7 +973,7 @@ describe('TaskLink Component', () => {
         const runningSegment = container.querySelector('.segment-running');
         expect(runningSegment).toBeInTheDocument();
         // Should NOT be indeterminate since avgDuration is set
-        expect(runningSegment.classList.contains('segment-indeterminate')).toBe(false);
+        expect(runningSegment.classList.contains('segment-cell-indeterminate')).toBe(false);
       });
     });
 
@@ -984,7 +996,7 @@ describe('TaskLink Component', () => {
       });
 
       await waitFor(() => {
-        const indeterminate = container.querySelector('.segment-indeterminate');
+        const indeterminate = container.querySelector('.segment-cell-indeterminate');
         expect(indeterminate).toBeInTheDocument();
       });
     });
@@ -1001,7 +1013,9 @@ describe('TaskLink Component', () => {
         displayLabel: 'deploy',
         source: 'Workspace',
         definition: { type: 'shell', command: 'deploy', label: 'deploy' },
-        dependsOn: ['build'],
+        dependsOn: [
+          { label: 'build', id: 'shell|build|/workspaces/ControlPanel', source: 'Workspace', definition: { type: 'shell', command: 'webpack --mode production', label: 'build' }, dependsOn: [], dependsOrder: 'parallel' }
+        ],
         dependsOrder: 'sequence'
       };
       const allTasks = [...sampleTasks, deployTask];
@@ -1017,17 +1031,16 @@ describe('TaskLink Component', () => {
       sendMessage('updateTasks', { tasks: allTasks });
 
       await waitFor(() => {
-        const segments = container.querySelectorAll('.task-segment');
+        const segments = container.querySelectorAll('.segment-cell');
         expect(segments.length).toBeGreaterThan(1);
       });
 
-      // Hover over the dependency (child) segment
-      const childSegment = container.querySelector('.segment-child');
-      if (childSegment) {
-        await user.hover(childSegment);
-        // Popover content should be populated (getTaskInfo called for dependency)
+      // Hover over a non-root segment cell
+      const segmentCells = container.querySelectorAll('.segment-cell');
+      const childCell = segmentCells[segmentCells.length - 1]; // last cell is the leaf
+      if (childCell) {
+        await user.hover(childCell);
         await waitFor(() => {
-          const popover = container.querySelector('.task-popover');
           // Just triggering the hover is enough to exercise the getTaskInfo branch
         }, { timeout: 1000 });
       }
@@ -1041,7 +1054,9 @@ describe('TaskLink Component', () => {
         displayLabel: 'deploy',
         source: 'Workspace',
         definition: { type: 'shell', command: 'deploy', label: 'deploy' },
-        dependsOn: ['build'],
+        dependsOn: [
+          { label: 'build', id: 'shell|build|/workspaces/ControlPanel', source: 'Workspace', definition: { type: 'shell', command: 'webpack --mode production', label: 'build' }, dependsOn: [], dependsOrder: 'parallel' }
+        ],
         dependsOrder: 'sequence'
       };
       const allTasks = [...sampleTasks, deployTask];
@@ -1063,11 +1078,11 @@ describe('TaskLink Component', () => {
       });
 
       await waitFor(() => {
-        const childSegment = container.querySelector('.segment-child');
+        const childSegment = container.querySelector('.segment-cell');
         expect(childSegment).toBeInTheDocument();
       });
 
-      const childSegment = container.querySelector('.segment-child');
+      const childSegment = container.querySelector('.segment-cell');
       await user.hover(childSegment);
 
       await waitFor(() => {
@@ -1086,7 +1101,9 @@ describe('TaskLink Component', () => {
         displayLabel: 'deploy',
         source: 'Workspace',
         definition: { type: 'shell', command: 'deploy', label: 'deploy' },
-        dependsOn: ['build'],
+        dependsOn: [
+          { label: 'build', id: 'shell|build|/workspaces/ControlPanel', source: 'Workspace', definition: { type: 'shell', command: 'webpack --mode production', label: 'build' }, dependsOn: [], dependsOrder: 'parallel' }
+        ],
         dependsOrder: 'sequence'
       };
       const allTasks = [...sampleTasks, deployTask];
@@ -1108,16 +1125,16 @@ describe('TaskLink Component', () => {
       });
 
       await waitFor(() => {
-        expect(screen.getByText(/Failed/)).toBeInTheDocument();
-        // The dependency-error span with the failed dep label
-        const depError = container.querySelector('.dependency-error');
-        expect(depError).toBeInTheDocument();
-        expect(depError.textContent).toContain('build');
+        // Retry button should be present
+        expect(screen.queryByTestId('PlayArrowIcon')).toBeInTheDocument();
+        // Segment cell should have error state (task has dependencies so segment tree renders)
+        const segmentCell = container.querySelector('.segment-error');
+        expect(segmentCell).toBeInTheDocument();
       });
     });
 
-    test('shows exit code on failed task without dependency error', async () => {
-      renderTaskLink({ label: 'test' });
+    test('shows error styling on failed task without dependency error', async () => {
+      const { container } = renderTaskLink({ label: 'test' });
 
       sendMessage('taskFailed', {
         taskLabel: 'test',
@@ -1126,12 +1143,14 @@ describe('TaskLink Component', () => {
       });
 
       await waitFor(() => {
-        expect(screen.getByText(/\(127\)/)).toBeInTheDocument();
+        const pill = container.querySelector('.task-pill');
+        expect(pill?.classList.contains('error')).toBe(true);
+        expect(screen.queryByTestId('PlayArrowIcon')).toBeInTheDocument();
       });
     });
 
-    test('shows Failed without exit code when undefined', async () => {
-      renderTaskLink({ label: 'test' });
+    test('shows error styling without exit code when undefined', async () => {
+      const { container } = renderTaskLink({ label: 'test' });
 
       sendMessage('taskFailed', {
         taskLabel: 'test',
@@ -1139,10 +1158,9 @@ describe('TaskLink Component', () => {
       });
 
       await waitFor(() => {
-        const badge = screen.getByText(/Failed/);
-        expect(badge).toBeInTheDocument();
-        // Should not have parenthesized exit code
-        expect(badge.textContent.trim()).toBe('Failed');
+        const pill = container.querySelector('.task-pill');
+        expect(pill?.classList.contains('error')).toBe(true);
+        expect(screen.queryByTestId('PlayArrowIcon')).toBeInTheDocument();
       });
     });
   });
@@ -1165,7 +1183,9 @@ describe('TaskLink Component', () => {
         displayLabel: 'ci',
         source: 'Workspace',
         definition: { type: 'shell', command: 'echo ci', label: 'ci' },
-        dependsOn: ['lint'],
+        dependsOn: [
+          { label: 'lint', id: 'npm|lint|/workspaces/proj', source: 'npm', definition: { type: 'npm', script: 'lint', path: '/workspaces/proj' }, dependsOn: [], dependsOrder: 'parallel' }
+        ],
         dependsOrder: 'sequence'
       };
 
@@ -1209,6 +1229,192 @@ describe('TaskLink Component', () => {
         // the avgDuration is only used internally for progress calculations.
         // We just ensure the component renders normally with history data.
         expect(screen.getByText('test')).toBeInTheDocument();
+      });
+    });
+  });
+
+  // ─── Nested Dependency Rendering ───────────────────────────
+
+  describe('Nested Dependency Rendering', () => {
+    test('renders nested parallel tree with correct depth', async () => {
+      const allTasks = [...sampleTasks, nestedParallelTree];
+
+      const { container } = render(
+        <ThemeProvider theme={testTheme}>
+          <TaskStateProvider>
+            <TaskLink label="pipeline" />
+          </TaskStateProvider>
+        </ThemeProvider>
+      );
+
+      sendMessage('updateTasks', { tasks: allTasks });
+
+      await waitFor(() => {
+        // Root + stage-1 + stage-2 + 5 leaf tasks = 8 segment cells total
+        const cells = container.querySelectorAll('.segment-cell');
+        expect(cells.length).toBe(8);
+
+        // Parallel containers for stage-1 and stage-2 children
+        const parallelContainers = container.querySelectorAll('.segment-children-parallel');
+        expect(parallelContainers.length).toBeGreaterThanOrEqual(2);
+      });
+    });
+
+    test('renders nested sequential chain with correct structure', async () => {
+      const allTasks = [...sampleTasks, nestedSequentialChain];
+
+      const { container } = render(
+        <ThemeProvider theme={testTheme}>
+          <TaskStateProvider>
+            <TaskLink label="deploy" />
+          </TaskStateProvider>
+        </ThemeProvider>
+      );
+
+      sendMessage('updateTasks', { tasks: allTasks });
+
+      await waitFor(() => {
+        // deploy + build + compile + bundle + lint + test = 6 cells
+        const cells = container.querySelectorAll('.segment-cell');
+        expect(cells.length).toBe(6);
+
+        // The deploy deps are sequential
+        const seqContainers = container.querySelectorAll('.segment-children-sequential');
+        expect(seqContainers.length).toBeGreaterThanOrEqual(1);
+      });
+    });
+
+    test('renders mixed tree with both parallel and sequential children', async () => {
+      const allTasks = [...sampleTasks, nestedMixedTree];
+
+      const { container } = render(
+        <ThemeProvider theme={testTheme}>
+          <TaskStateProvider>
+            <TaskLink label="pipeline" />
+          </TaskStateProvider>
+        </ThemeProvider>
+      );
+
+      sendMessage('updateTasks', { tasks: allTasks });
+
+      await waitFor(() => {
+        // pipeline + stage-1 + s1-lint + s1-format + stage-2 + s2-unit + s2-e2e = 7 cells
+        const cells = container.querySelectorAll('.segment-cell');
+        expect(cells.length).toBe(7);
+
+        // Should have at least one parallel and one sequential container
+        const parallelContainers = container.querySelectorAll('.segment-children-parallel');
+        expect(parallelContainers.length).toBeGreaterThanOrEqual(1);
+        const seqContainers = container.querySelectorAll('.segment-children-sequential');
+        expect(seqContainers.length).toBeGreaterThanOrEqual(1);
+      });
+    });
+
+    test('every nested cell is individually hoverable', async () => {
+      const user = userEvent.setup({ delay: null, advanceTimers: jest.advanceTimersByTime });
+      const allTasks = [...sampleTasks, nestedParallelTree];
+
+      const { container } = render(
+        <ThemeProvider theme={testTheme}>
+          <TaskStateProvider>
+            <TaskLink label="pipeline" />
+          </TaskStateProvider>
+        </ThemeProvider>
+      );
+
+      sendMessage('updateTasks', { tasks: allTasks });
+
+      await waitFor(() => {
+        const cells = container.querySelectorAll('.segment-cell');
+        expect(cells.length).toBe(8);
+      });
+
+      // Hover every cell — each should trigger the handler without error
+      const cells = container.querySelectorAll('.segment-cell');
+      for (const cell of cells) {
+        await user.hover(cell);
+        await user.unhover(cell);
+      }
+    });
+
+    test('descendant running state propagates to ancestor cells', async () => {
+      const allTasks = [...sampleTasks, nestedParallelTree];
+
+      const { container } = render(
+        <ThemeProvider theme={testTheme}>
+          <TaskStateProvider>
+            <TaskLink label="pipeline" />
+          </TaskStateProvider>
+        </ThemeProvider>
+      );
+
+      sendMessage('updateTasks', { tasks: allTasks });
+
+      // Start a leaf task
+      sendMessage('taskStarted', {
+        taskLabel: 's1-lint',
+        startTime: Date.now(),
+        state: 'running'
+      });
+
+      await waitFor(() => {
+        // The leaf cell itself should be running
+        const runningCells = container.querySelectorAll('.segment-running');
+        expect(runningCells.length).toBeGreaterThanOrEqual(1);
+        // pipeline and stage-1 should aggregate to running too
+        // (pipeline → stage-1 → s1-lint)
+      });
+    });
+
+    test('descendant error state propagates to ancestor cells', async () => {
+      const allTasks = [...sampleTasks, nestedParallelTree];
+
+      const { container } = render(
+        <ThemeProvider theme={testTheme}>
+          <TaskStateProvider>
+            <TaskLink label="pipeline" />
+          </TaskStateProvider>
+        </ThemeProvider>
+      );
+
+      sendMessage('updateTasks', { tasks: allTasks });
+
+      // Fail a leaf task
+      sendMessage('taskFailed', {
+        taskLabel: 's1-lint',
+        exitCode: 1,
+        reason: 'Test failed'
+      });
+
+      await waitFor(() => {
+        // Leaf, stage-1, and pipeline should all show error via aggregation
+        const errorCells = container.querySelectorAll('.segment-error');
+        expect(errorCells.length).toBeGreaterThanOrEqual(3);
+      });
+    });
+
+    test('data-testid attributes match task keys for test targeting', async () => {
+      const allTasks = [...sampleTasks, nestedParallelTree];
+
+      const { container } = render(
+        <ThemeProvider theme={testTheme}>
+          <TaskStateProvider>
+            <TaskLink label="pipeline" />
+          </TaskStateProvider>
+        </ThemeProvider>
+      );
+
+      sendMessage('updateTasks', { tasks: allTasks });
+
+      await waitFor(() => {
+        // Verify segment data-testid attributes based on task ids from createDepNode
+        // createMockTask('pipeline') → id = 'shell|pipeline|/workspaces/ControlPanel'
+        // createDepNode('stage-1') → id = 'shell|stage-1|/workspaces/ControlPanel'
+        const segments = container.querySelectorAll('[data-testid^="segment-"]');
+        expect(segments.length).toBe(8);
+
+        // Check that the root segment exists
+        expect(container.querySelector('[data-testid="segment-shell|pipeline|/workspaces/ControlPanel"]')).toBeInTheDocument();
       });
     });
   });

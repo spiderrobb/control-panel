@@ -219,35 +219,27 @@ body {
   user-select: none;
 }
 
-.task-segments {
+/* Segment Tree Container */
+.segment-tree-container {
   display: inline-flex;
-  align-items: stretch;
   border: 1px solid rgba(128, 128, 128, 0.3);
   border-radius: 3px;
   overflow: hidden;
   font-family: var(--vscode-editor-font-family);
   flex: 1;
+  min-width: 0;
 }
 
-.task-segments-sequence .task-segment {
-  border-right: 1px solid var(--vscode-button-border);
+/* Recursive Segment: row = cell + children */
+.segment {
+  display: flex;
+  flex-direction: row;
+  min-width: 0;
+  flex-grow: 1;
 }
 
-.task-segments-sequence .task-segment:last-child {
-  border-right: none;
-}
-
-.task-segments-parallel {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  grid-template-rows: repeat(var(--rows), minmax(24px, auto));
-  border: 1px solid rgba(128, 128, 128, 0.3);
-  border-radius: 3px;
-  overflow: hidden;
-  flex: 1;
-}
-
-.task-segment {
+/* Individual hoverable cell */
+.segment-cell {
   padding: 4px 8px;
   font-size: 0.85em;
   white-space: nowrap;
@@ -256,12 +248,56 @@ body {
   cursor: pointer;
   position: relative;
   overflow: hidden;
+  flex-shrink: 0;
+  flex-grow: 1;
 }
 
-.segment-parent {
+.segment-cell .segment-label {
+  user-select: none;
+}
+
+.segment-root > .segment-cell {
   font-weight: 500;
 }
 
+/* Children containers */
+.segment-children {
+  display: flex;
+  min-width: 0;
+  flex-grow: 1;
+}
+
+.segment-children-parallel {
+  flex-direction: column;
+}
+
+.segment-children-sequential {
+  flex-direction: row;
+}
+
+/* Borders between children */
+.segment-children-parallel > .segment {
+  border-top: 1px solid rgba(128, 128, 128, 0.25);
+}
+
+.segment-children-parallel > .segment:first-child {
+  border-top: none;
+}
+
+.segment-children-sequential > .segment {
+  border-left: 1px solid rgba(128, 128, 128, 0.25);
+}
+
+.segment-children-sequential > .segment:first-child {
+  border-left: none;
+}
+
+/* Border between cell and children */
+.segment > .segment-children {
+  border-left: 1px solid rgba(128, 128, 128, 0.25);
+}
+
+/* State classes applied to segment-cell */
 .segment-idle {
   background-color: rgba(255, 255, 255, 0.05);
   color: var(--vscode-foreground);
@@ -288,6 +324,27 @@ body {
   pointer-events: none;
 }
 
+.segment-descendant-running {
+  position: relative;
+  background-color: rgba(255, 255, 255, 0.05);
+  color: var(--vscode-foreground);
+  overflow: hidden;
+}
+
+.segment-descendant-running::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0) 0%,
+    rgba(255, 255, 255, 0.18) 50%,
+    rgba(255, 255, 255, 0) 100%
+  );
+  animation: segment-shimmer 1.6s ease-in-out infinite;
+  pointer-events: none;
+}
+
 .segment-timer {
   position: absolute;
   left: 0;
@@ -300,6 +357,11 @@ body {
 }
 
 .segment-timer-indeterminate {
+  width: 40%;
+  animation: segment-indeterminate 1.2s ease-in-out infinite;
+}
+
+.segment-cell-indeterminate .segment-timer {
   width: 40%;
   animation: segment-indeterminate 1.2s ease-in-out infinite;
 }

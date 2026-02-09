@@ -96,6 +96,16 @@ class MockWebviewView {
     this.webview = new MockWebview();
     this.visible = true;
     this.viewType = 'controlpanel.mdxView';
+    this._visibilityEmitter = new EventEmitter();
+  }
+  onDidChangeVisibility(listener) {
+    this._visibilityEmitter.on('event', listener);
+    return disposable(() => this._visibilityEmitter.removeListener('event', listener));
+  }
+  /** Helper: simulate hiding then showing the view (tab switch) */
+  _simulateVisibilityChange(visible) {
+    this.visible = visible;
+    this._visibilityEmitter.emit('event');
   }
 }
 

@@ -53,7 +53,7 @@ exports[`TaskList Component Rendering snapshot: multiple tasks layout 1`] = `
             </span>
             <span
               class="task-label"
-              title="Double-click to open task definition in tasks.json"
+              title="Double-click to open task definition"
             >
               test
             </span>
@@ -115,7 +115,7 @@ exports[`TaskList Component Rendering snapshot: multiple tasks layout 1`] = `
             </span>
             <span
               class="task-label"
-              title="Double-click to open task definition in tasks.json"
+              title="Double-click to open task definition"
             >
               build
             </span>
@@ -177,7 +177,7 @@ exports[`TaskList Component Rendering snapshot: multiple tasks layout 1`] = `
             </span>
             <span
               class="task-label"
-              title="Double-click to open task definition in tasks.json"
+              title="Double-click to open task definition"
             >
               <div
                 class="MuiChip-root MuiChip-filled MuiChip-sizeSmall MuiChip-colorDefault MuiChip-filledDefault css-dloa4z-MuiChip-root"
@@ -248,7 +248,7 @@ exports[`TaskList Component Rendering snapshot: multiple tasks layout 1`] = `
             </span>
             <span
               class="task-label"
-              title="Double-click to open task definition in tasks.json"
+              title="Double-click to open task definition"
             >
               lint
             </span>
