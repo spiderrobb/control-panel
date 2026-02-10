@@ -141,7 +141,8 @@ export function TaskStateProvider({ children }) {
             }
             if (!parentTask) {
               const parentEntry = Object.entries(prev).find(([_parentLabel, state]) => 
-                state.subtasks?.includes(message.taskLabel)
+                state.subtasks?.includes(message.taskLabel) &&
+                state.running // only re-attach to a parent that is still running
               );
               if (parentEntry) parentTask = parentEntry[0];
             }
@@ -337,6 +338,33 @@ export function TaskStateProvider({ children }) {
               });
             }
             
+            return updated;
+          });
+          break;
+        case 'dismissTaskGroup':
+          // Extension sends this before re-running a task to clear the
+          // entire previous task group (topmost parent + all descendants)
+          // from RunningTasksPanel so stale entries don't linger.
+          setRunningTasks(prev => {
+            const updated = { ...prev };
+            const toRemove = new Set();
+            const collect = (label) => {
+              if (!label || toRemove.has(label)) return;
+              toRemove.add(label);
+              // Walk children via subtasks array
+              const entry = updated[label];
+              if (entry?.subtasks) {
+                entry.subtasks.forEach(child => collect(child));
+              }
+            };
+            collect(message.label);
+            // Also catch any entry whose parentTask points into the removed set
+            Object.keys(updated).forEach(key => {
+              if (updated[key]?.parentTask && toRemove.has(updated[key].parentTask)) {
+                toRemove.add(key);
+              }
+            });
+            toRemove.forEach(label => delete updated[label]);
             return updated;
           });
           break;

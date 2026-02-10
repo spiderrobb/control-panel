@@ -32,10 +32,11 @@ suite('Concurrency and Race Condition Tests', () => {
   //  Concurrent Task Starts
   // -----------------------------------------------------------------------
   suite('Concurrent Task Execution', () => {
-    test('multiple simultaneous handleTaskStarted for different tasks', () => {
+    test('multiple simultaneous handleTaskStarted for different tasks', async () => {
       provider.handleTaskStarted(createStartEvent('build'));
       provider.handleTaskStarted(createStartEvent('test'));
       provider.handleTaskStarted(createStartEvent('lint'));
+      await provider._taskStartQueue;
 
       assert.strictEqual(provider._runningTasks.size, 3);
       assert.strictEqual(provider._taskStates.get('Workspace|build'), 'running');
@@ -46,6 +47,7 @@ suite('Concurrency and Race Condition Tests', () => {
     test('rapid start/stop on the same task label', async () => {
       // Start
       provider.handleTaskStarted(createStartEvent('build'));
+      await provider._taskStartQueue;
       assert.strictEqual(provider._taskStates.get('Workspace|build'), 'running');
 
       // End
@@ -54,6 +56,7 @@ suite('Concurrency and Race Condition Tests', () => {
 
       // Start again
       provider.handleTaskStarted(createStartEvent('build'));
+      await provider._taskStartQueue;
       assert.strictEqual(provider._taskStates.get('Workspace|build'), 'running');
       assert.ok(provider._runningTasks.has('Workspace|build'));
     });
@@ -131,12 +134,13 @@ suite('Concurrency and Race Condition Tests', () => {
       assert.ok(msg);
     });
 
-    test('concurrent state modifications via handleTaskStarted', () => {
+    test('concurrent state modifications via handleTaskStarted', async () => {
       // Start the same task twice rapidly (simulating duplicate events)
       const event1 = createStartEvent('build');
       const event2 = createStartEvent('build');
       provider.handleTaskStarted(event1);
       provider.handleTaskStarted(event2);
+      await provider._taskStartQueue;
 
       // Guard prevents duplicate — first event's execution is retained
       assert.strictEqual(provider._taskStates.get('Workspace|build'), 'running');
@@ -168,10 +172,11 @@ suite('Concurrency and Race Condition Tests', () => {
       assert.strictEqual(provider._taskHierarchy.has('Workspace|p'), false);
     });
 
-    test('handleTaskEnded cleans up hierarchy for the ended task', () => {
+    test('handleTaskEnded cleans up hierarchy for the ended task', async () => {
       provider.handleTaskStarted(createStartEvent('parent'));
-      provider.addSubtask('Workspace|parent', 'Workspace|child');
       provider.handleTaskStarted(createStartEvent('child'));
+      await provider._taskStartQueue;
+      provider.addSubtask('Workspace|parent', 'Workspace|child');
 
       // End parent — its hierarchy entry should be deleted
       provider.handleTaskEnded(createEndEvent('parent', 0));
@@ -186,9 +191,8 @@ suite('Concurrency and Race Condition Tests', () => {
     test('restoreRunningTasksState re-sends running tasks to webview', async () => {
       provider.handleTaskStarted(createStartEvent('build'));
       provider.handleTaskStarted(createStartEvent('test'));
+      await provider._taskStartQueue;
 
-      // Flush microtasks from the .then() inside handleTaskStarted, then clear
-      await new Promise(resolve => setTimeout(resolve, 0));
       view.webview._messages = [];
       await provider.restoreRunningTasksState();
 
@@ -196,17 +200,25 @@ suite('Concurrency and Race Condition Tests', () => {
       assert.strictEqual(startedMsgs.length, 2);
     });
 
-    test('restoreRunningTasksState sends taskFailed for failed tasks', async () => {
-      provider.handleTaskStarted(createStartEvent('build')); // Just to have state? failed tasks are different.
-      // Actually failed tasks don't need to be running.
-      
-      provider._taskFailures.set('Workspace|build', { exitCode: 1, reason: 'compile error' });
+    test('restoreRunningTasksState sends taskCompleted for failed tasks', async () => {
+      // Start the task so it appears in _runningTasks and _taskStartTimes
+      provider.handleTaskStarted(createStartEvent('build'));
+      await provider._taskStartQueue;
+
+      // Mark it as failed via _taskResults (the Map the provider actually uses)
+      provider._taskResults.set('Workspace|build', { exitCode: 1, failed: true, reason: 'compile error' });
 
       view.webview._messages = [];
       await provider.restoreRunningTasksState();
 
-      const failedMsgs = view.webview._messages.filter(m => m.type === 'taskFailed');
+      // Provider sends 'taskCompleted' with the failure info, not 'taskFailed'
+      const failedMsgs = view.webview._messages.filter(
+        m => m.type === 'taskCompleted' && m.taskLabel === 'Workspace|build'
+      );
       assert.strictEqual(failedMsgs.length, 1);
+      assert.strictEqual(failedMsgs[0].exitCode, 1);
+      assert.strictEqual(failedMsgs[0].failed, true);
+      assert.strictEqual(failedMsgs[0].reason, 'compile error');
     });
   });
 });

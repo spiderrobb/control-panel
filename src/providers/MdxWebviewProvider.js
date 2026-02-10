@@ -30,6 +30,23 @@ class MdxWebviewProvider {
     context.subscriptions.push(this._taskEnd);
   }
 
+  dispose() {
+    if (this._taskExecution) {
+      this._taskExecution.dispose();
+    }
+    if (this._taskEnd) {
+      this._taskEnd.dispose();
+    }
+    this._runningTasks.clear();
+    this._taskHierarchy.clear();
+    this._taskStartTimes.clear();
+    this._taskResults.clear();
+    this._taskStates.clear();
+    this._stoppingTasks.clear();
+    this._cancelledTasks.clear();
+    this._ensureParentPromises.clear();
+  }
+
   // Generate a unique ID for a task
   getTaskId(task) {
     if (!task) return null;
@@ -548,6 +565,47 @@ class MdxWebviewProvider {
   getTaskHierarchy(label) {
     const subtasks = this._taskHierarchy.get(label);
     return subtasks ? Array.from(subtasks) : [];
+  }
+
+  /**
+   * Walk _taskHierarchy upward from `taskId` to find the root ancestor.
+   * Returns `taskId` itself if it has no parent in the hierarchy.
+   */
+  _findTopmostParent(taskId) {
+    let current = taskId;
+    const visited = new Set();
+    for (;;) {
+      if (visited.has(current)) return current; // cycle guard
+      visited.add(current);
+      let parent = null;
+      for (const [parentId, children] of this._taskHierarchy) {
+        if (children.has(current)) { parent = parentId; break; }
+      }
+      if (!parent) return current;
+      current = parent;
+    }
+  }
+
+  /**
+   * Recursively collect all descendants of `taskId` from _taskHierarchy.
+   * Returns a flat array of all child/grandchild/… IDs (not including taskId itself).
+   */
+  _collectAllDescendants(taskId) {
+    const result = [];
+    const visited = new Set();
+    const walk = (id) => {
+      const children = this._taskHierarchy.get(id);
+      if (!children) return;
+      for (const child of children) {
+        if (!visited.has(child)) {
+          visited.add(child);
+          result.push(child);
+          walk(child);
+        }
+      }
+    };
+    walk(taskId);
+    return result;
   }
 
   async restoreNavigationState() {
@@ -1169,32 +1227,60 @@ class MdxWebviewProvider {
     if (task) {
       const taskId = this.getTaskId(task);
 
-      // Clear ALL stale in-memory state before re-run.
-      // When a task is stopped via stopTask(), its children are added to
-      // _cancelledTasks so their end-events are ignored. If handleTaskEnded
-      // doesn't fire (race with terminal disposal), those entries become
-      // orphaned. On restart, handleTaskStarted would see the stale entry
-      // and bail out — suppressing UI updates (no Stop button, no state
-      // change). Clearing everything here guarantees a clean slate.
-      const previousChildren = this._taskHierarchy.get(taskId);
-      if (previousChildren) {
-        for (const childId of previousChildren) {
-          this._cancelledTasks.delete(childId);
-          this._taskStates.delete(childId);
-          this._taskStartTimes.delete(childId);
-          this._taskResults.delete(childId);
-          this._stoppingTasks.delete(childId);
+      // Find the top-most parent of this task so we can clear the entire
+      // previous task group from both the webview and in-memory state.
+      // This ensures stale completed/failed siblings and children from a
+      // prior run are removed before the new execution begins.
+      let topmostParent = this._findTopmostParent(taskId);
+
+      // Fallback: if _findTopmostParent found no in-memory parent (hierarchy
+      // was already cleared by handleTaskEnded), check persisted completed
+      // tasks for a parent group that previously contained this task.
+      // Example: "demo:pipeline" completed (hierarchy cleared), user re-runs
+      // "demo:stage-2" — we need to find and dismiss the old pipeline group.
+      if (topmostParent === taskId) {
+        const persisted = await this.getPersistedCompletedTasks();
+        let current = taskId;
+        const visited = new Set();
+        while (current && !visited.has(current)) {
+          visited.add(current);
+          // Find any persisted entry whose subtasks array includes current
+          const parentEntry = Object.entries(persisted).find(([_label, info]) =>
+            info.subtasks?.includes(current)
+          );
+          if (parentEntry) {
+            current = parentEntry[0]; // walk up to the parent
+          } else {
+            break;
+          }
+        }
+        if (current !== taskId) {
+          topmostParent = current;
         }
       }
-      this._cancelledTasks.delete(taskId);
-      this._taskHierarchy.delete(taskId);
-      this._taskStates.delete(taskId);
-      this._taskStartTimes.delete(taskId);
-      this._taskResults.delete(taskId);
-      this._stoppingTasks.delete(taskId);
 
-      // Clear persisted completion record
-      await this.clearCompletedTask(taskId);
+      // Tell the webview to remove the entire task group from RunningTasksPanel
+      this._view?.webview.postMessage({
+        type: 'dismissTaskGroup',
+        label: topmostParent
+      });
+
+      // Clear ALL stale in-memory state before re-run.
+      // Walk the full tree from the topmost parent downward so that
+      // ancestors, siblings, and all descendants are cleaned up.
+      const allToClear = [topmostParent, ...this._collectAllDescendants(topmostParent)];
+      for (const id of allToClear) {
+        this._cancelledTasks.delete(id);
+        this._taskStates.delete(id);
+        this._taskStartTimes.delete(id);
+        this._taskResults.delete(id);
+        this._stoppingTasks.delete(id);
+        this._runningTasks.delete(id);
+        this._taskHierarchy.delete(id);
+      }
+
+      // Clear persisted completion record for the full tree
+      await this.clearCompletedTask(topmostParent);
 
       // Register the full dependency tree recursively so the hierarchy
       // is fully populated before VS Code starts firing onDidStartTaskProcess
@@ -1559,6 +1645,7 @@ class MdxWebviewProvider {
     this._taskStartQueue = (this._taskStartQueue || Promise.resolve())
       .then(() => this._handleTaskStartedImpl(event))
       .catch(err => this._logger.error('Error in handleTaskStarted:', err));
+    return this._taskStartQueue;
   }
 
   async _handleTaskStartedImpl(event) {

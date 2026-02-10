@@ -177,10 +177,16 @@ const tasks = {
     return Promise.resolve(execution);
   },
 
+  // Read-only in real API; mutable here for testing
+  taskExecutions: [],
+
   // Test helpers (not part of real API)
   _registeredTasks,
   _registerTask(task) { _registeredTasks.push(task); },
-  _clearTasks() { _registeredTasks.length = 0; },
+  _clearTasks() {
+    _registeredTasks.length = 0;
+    tasks.taskExecutions = [];
+  },
   _emitStart(event) { _taskStartEmitter.emit('event', event); },
   _emitEnd(event) { _taskEndEmitter.emit('event', event); },
 };

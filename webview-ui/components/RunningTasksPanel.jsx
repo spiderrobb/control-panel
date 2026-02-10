@@ -6,11 +6,12 @@ import LinearProgress from '@mui/material/LinearProgress';
 import StopIcon from '@mui/icons-material/Stop';
 import BoltIcon from '@mui/icons-material/Bolt';
 import CloseIcon from '@mui/icons-material/Close';
+import ReplayIcon from '@mui/icons-material/Replay';
 import ClearAllIcon from '@mui/icons-material/ClearAll';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 
-function RunningTasksPanel({ runningTasks, allTasks, onStop, onFocus, onOpenDefinition, onDismiss, onShowLogs, onRequestLogBuffer, logBuffer, isCollapsed, onToggleCollapsed }) {
+function RunningTasksPanel({ runningTasks, allTasks, onStop, onFocus, onOpenDefinition, onDismiss, onRestart, onShowLogs, onRequestLogBuffer, logBuffer, isCollapsed, onToggleCollapsed }) {
   const [showDebug, setShowDebug] = useState(false);
   const runningTasksList = Object.entries(runningTasks).filter(([_, state]) => state.running || state.failed || state.completed);
 
@@ -160,6 +161,7 @@ function RunningTasksPanel({ runningTasks, allTasks, onStop, onFocus, onOpenDefi
               onFocus={onFocus}
               onOpenDefinition={onOpenDefinition}
               onDismiss={onDismiss}
+              onRestart={onRestart}
               allRunningTasks={runningTasks}
               allTasks={allTasks}
               depth={0}
@@ -171,7 +173,7 @@ function RunningTasksPanel({ runningTasks, allTasks, onStop, onFocus, onOpenDefi
   );
 }
 
-function RunningTaskItem({ label, state, onStop, onFocus, onOpenDefinition, onDismiss, allRunningTasks, allTasks, depth = 0 }) {
+function RunningTaskItem({ label, state, onStop, onFocus, onOpenDefinition, onDismiss, onRestart, allRunningTasks, allTasks, depth = 0 }) {
   const [runtime, setRuntime] = useState(0);
   const [progress, setProgress] = useState(0);
   
@@ -296,7 +298,20 @@ function RunningTaskItem({ label, state, onStop, onFocus, onOpenDefinition, onDi
                 </IconButton>
               </span>
             </Tooltip>
-            {isCompleted && depth === 0 ? (
+            {isFailed && depth === 0 && onRestart && (
+              <Tooltip title="Restart task">
+                <span>
+                  <IconButton
+                    size="small"
+                    onClick={() => onRestart(label)}
+                    sx={{ p: 0.5 }}
+                  >
+                    <ReplayIcon sx={{ fontSize: 16 }} />
+                  </IconButton>
+                </span>
+              </Tooltip>
+            )}
+            {(isCompleted || isFailed) && depth === 0 ? (
               <Tooltip title="Dismiss">
                 <span>
                   <IconButton
@@ -308,7 +323,7 @@ function RunningTaskItem({ label, state, onStop, onFocus, onOpenDefinition, onDi
                   </IconButton>
                 </span>
               </Tooltip>
-            ) : !isCompleted ? (
+            ) : !isCompleted && !isFailed ? (
               <Tooltip title={isStopping ? "Stopping..." : (canStop ? "Stop task" : "Cannot stop task")}>
                 <span>
                   <IconButton
@@ -364,6 +379,7 @@ function RunningTaskItem({ label, state, onStop, onFocus, onOpenDefinition, onDi
             onFocus={onFocus}
             onOpenDefinition={onOpenDefinition}
             onDismiss={onDismiss}
+            onRestart={onRestart}
             allRunningTasks={allRunningTasks}
             allTasks={allTasks}
             depth={depth + 1}

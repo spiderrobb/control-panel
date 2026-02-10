@@ -195,6 +195,7 @@
       "type": "shell",
       "command": "echo '✅ Partial completion'",
       "dependsOn": ["fail:exit1", "fail:exit2", "lint"],
+      "dependsOrder": "parallel",
       "problemMatcher": []
     },
     {
@@ -264,7 +265,7 @@
       "type": "shell",
       "command": "npm run lint",
       "group": "test",
-      "problemMatcher": []
+      "problemMatcher": ["$eslint-stylish"]
     },
     {
       "label": "multi-source:test",

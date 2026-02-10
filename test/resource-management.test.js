@@ -34,39 +34,39 @@ suite('Resource Management Tests', () => {
   //  State Map Cleanup
   // -----------------------------------------------------------------------
   suite('State Map Cleanup on Task Completion', () => {
-    test('runningTasks is cleared after task ends', () => {
-      provider.handleTaskStarted(createStartEvent('build'));
+    test('runningTasks is cleared after task ends', async () => {
+      await provider.handleTaskStarted(createStartEvent('build'));
       assert.ok(provider._runningTasks.has('Workspace|build'));
       provider.handleTaskEnded(createEndEvent('build', 0));
       assert.strictEqual(provider._runningTasks.has('Workspace|build'), false);
     });
 
-    test('taskStartTimes is cleared after task ends', () => {
-      provider.handleTaskStarted(createStartEvent('build'));
+    test('taskStartTimes is cleared after task ends', async () => {
+      await provider.handleTaskStarted(createStartEvent('build'));
       assert.ok(provider._taskStartTimes.has('Workspace|build'));
       provider.handleTaskEnded(createEndEvent('build', 0));
       assert.strictEqual(provider._taskStartTimes.has('Workspace|build'), false);
     });
 
-    test('taskHierarchy is cleared after parent task ends', () => {
-      provider.handleTaskStarted(createStartEvent('parent'));
+    test('taskHierarchy is cleared after parent task ends', async () => {
+      await provider.handleTaskStarted(createStartEvent('parent'));
       provider.addSubtask('Workspace|parent', 'Workspace|child');
       provider.handleTaskEnded(createEndEvent('parent', 0));
       assert.strictEqual(provider._taskHierarchy.has('Workspace|parent'), false);
     });
 
-    test('multiple task start/end cycles leave no orphan state', () => {
+    test('multiple task start/end cycles leave no orphan state', async () => {
       for (let i = 0; i < 10; i++) {
         const label = `task-${i}`;
-        provider.handleTaskStarted(createStartEvent(label));
+        await provider.handleTaskStarted(createStartEvent(label));
         provider.handleTaskEnded(createEndEvent(label, 0));
       }
       assert.strictEqual(provider._runningTasks.size, 0);
       assert.strictEqual(provider._taskStartTimes.size, 0);
     });
 
-    test('_taskStates entries are cleaned up after completion', () => {
-      provider.handleTaskStarted(createStartEvent('build'));
+    test('_taskStates entries are cleaned up after completion', async () => {
+      await provider.handleTaskStarted(createStartEvent('build'));
       assert.strictEqual(provider._taskStates.get('Workspace|build'), 'running');
       provider.handleTaskEnded(createEndEvent('build', 0));
       assert.strictEqual(provider._taskStates.has('Workspace|build'), false);

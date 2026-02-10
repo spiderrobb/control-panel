@@ -342,13 +342,14 @@ function TaskLink({ label, taskId, displayLabel, disabled = false }) {
 
   const tooltipTitle = taskNotFound ? 'Task not found' : '';
   const containerSx = taskNotFound 
-    ? { opacity: 0.8 }
+    ? { opacity: 0.45, '& .task-expanded, & .task-pill': { borderLeftColor: '#555' } }
     : disabled 
     ? { 
         backgroundColor: 'var(--vscode-input-background)',
         color: 'var(--vscode-descriptionForeground)',
-        opacity: 0.6,
-        cursor: 'not-allowed'
+        opacity: 0.4,
+        cursor: 'not-allowed',
+        '& .task-expanded, & .task-pill': { borderLeftColor: '#555' }
       }
     : {};
 

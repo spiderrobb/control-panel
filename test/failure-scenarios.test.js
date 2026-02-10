@@ -3,6 +3,11 @@
  *
  * Tests failure handling, failure propagation through the hierarchy,
  * persisted failure state, and the stopTask escalation sequence.
+ *
+ * Updated to match the current MdxWebviewProvider API which uses:
+ *   - _taskResults (Map) instead of the legacy _taskFailures
+ *   - saveCompletedTask / getPersistedCompletedTasks / clearCompletedTask
+ *   - 'taskCompleted' webview message (with `failed` flag) instead of 'taskFailed'
  */
 
 const assert = require('assert');
@@ -13,6 +18,15 @@ const {
   createEndEvent,
   vscode,
 } = require('./helpers/provider-factory');
+
+/**
+ * Helper: handleTaskStarted is async (queued via _taskStartQueue).
+ * After calling provider.handleTaskStarted(event), await this to
+ * ensure the handler has finished before making assertions.
+ */
+async function awaitTaskStart(provider) {
+  await provider._taskStartQueue;
+}
 
 suite('Failure Scenario Tests', () => {
   let provider, view;
@@ -25,78 +39,102 @@ suite('Failure Scenario Tests', () => {
 
   teardown(() => {
     sandbox.restore();
+    vscode.tasks._clearTasks();
   });
 
   // -----------------------------------------------------------------------
   //  Task Failure Handling
   // -----------------------------------------------------------------------
   suite('Task Failure Handling', () => {
-    test('exit code 1 sets failure state', () => {
+    test('exit code 1 sets failure state in _taskResults', async () => {
       provider.handleTaskStarted(createStartEvent('build'));
+      await awaitTaskStart(provider);
       provider.handleTaskEnded(createEndEvent('build', 1));
+      // State should be cleaned up after handleTaskEnded
       assert.strictEqual(provider._taskStates.has('Workspace|build'), false);
-      assert.ok(provider._taskFailures.has('Workspace|build'));
-      assert.strictEqual(provider._taskFailures.get('Workspace|build').exitCode, 1);
+      // Result should be tracked in _taskResults
+      assert.ok(provider._taskResults.has('Workspace|build'));
+      assert.strictEqual(provider._taskResults.get('Workspace|build').exitCode, 1);
+      assert.strictEqual(provider._taskResults.get('Workspace|build').failed, true);
     });
 
-    test('exit code 127 (command not found) sets failure state', () => {
+    test('exit code 127 (command not found) sets failure state', async () => {
       provider.handleTaskStarted(createStartEvent('missing'));
+      await awaitTaskStart(provider);
       provider.handleTaskEnded(createEndEvent('missing', 127));
       assert.strictEqual(provider._taskStates.has('Workspace|missing'), false);
-      assert.strictEqual(provider._taskFailures.get('Workspace|missing').exitCode, 127);
+      assert.strictEqual(provider._taskResults.get('Workspace|missing').exitCode, 127);
+      assert.strictEqual(provider._taskResults.get('Workspace|missing').failed, true);
     });
 
-    test('exit code 0 does NOT set failure state', () => {
+    test('exit code 0 tracks result with failed=false', async () => {
       provider.handleTaskStarted(createStartEvent('build'));
+      await awaitTaskStart(provider);
       provider.handleTaskEnded(createEndEvent('build', 0));
       assert.strictEqual(provider._taskStates.has('Workspace|build'), false);
-      assert.strictEqual(provider._taskFailures.has('Workspace|build'), false);
+      // Result is tracked for exit code 0, but failed should be false
+      assert.ok(provider._taskResults.has('Workspace|build'));
+      assert.strictEqual(provider._taskResults.get('Workspace|build').failed, false);
     });
 
-    test('failure info includes reason, timestamp, and duration', () => {
+    test('failure info includes reason, timestamp, and duration', async () => {
       provider.handleTaskStarted(createStartEvent('build'));
+      await awaitTaskStart(provider);
       provider.handleTaskEnded(createEndEvent('build', 1));
-      const info = provider._taskFailures.get('Workspace|build');
+      const info = provider._taskResults.get('Workspace|build');
       assert.ok(info.reason);
       assert.ok(info.timestamp);
       assert.ok(info.duration !== undefined);
     });
 
-    test('failure persists to globalState', async () => {
+    test('failure persists to workspaceState via saveCompletedTask', async () => {
       provider.handleTaskStarted(createStartEvent('build'));
+      await awaitTaskStart(provider);
       provider.handleTaskEnded(createEndEvent('build', 1));
-      // saveFailedTask is async fire-and-forget, give it a tick
-      await new Promise(r => setTimeout(r, 10));
-      const persisted = await provider.getPersistedFailedTasks();
+      // saveCompletedTask is async fire-and-forget, give it a tick
+      await new Promise(r => setTimeout(r, 20));
+      const persisted = await provider.getPersistedCompletedTasks();
       assert.ok(persisted['Workspace|build']);
       assert.strictEqual(persisted['Workspace|build'].exitCode, 1);
+      assert.strictEqual(persisted['Workspace|build'].failed, true);
     });
 
-    test('re-running a task clears previous failure from globalState', async () => {
+    test('re-running a task clears previous result from workspaceState', async () => {
       // Fail the task
       provider.handleTaskStarted(createStartEvent('build'));
+      await awaitTaskStart(provider);
       provider.handleTaskEnded(createEndEvent('build', 1));
-      await new Promise(r => setTimeout(r, 10));
+      await new Promise(r => setTimeout(r, 20));
 
-      // Re-start clears failure
+      // Re-start clears result (handleTaskStarted calls clearCompletedTask)
       provider.handleTaskStarted(createStartEvent('build'));
-      await new Promise(r => setTimeout(r, 10));
-      const persisted = await provider.getPersistedFailedTasks();
+      await awaitTaskStart(provider);
+      await new Promise(r => setTimeout(r, 20));
+      const persisted = await provider.getPersistedCompletedTasks();
       assert.strictEqual(persisted['Workspace|build'], undefined);
     });
 
-    test('taskFailed message is posted to webview', () => {
+    test('taskCompleted message with failed=true is posted to webview', async () => {
       provider.handleTaskStarted(createStartEvent('build'));
+      await awaitTaskStart(provider);
       provider.handleTaskEnded(createEndEvent('build', 1));
-      const msg = view.webview._messages.find(m => m.type === 'taskFailed' && m.taskLabel === 'Workspace|build');
-      assert.ok(msg);
+      const msg = view.webview._messages.find(
+        m => m.type === 'taskCompleted' && m.taskLabel === 'Workspace|build' && m.failed === true
+      );
+      assert.ok(msg, 'Expected a taskCompleted message with failed=true');
       assert.strictEqual(msg.exitCode, 1);
     });
 
-    test('undefined exitCode is treated as 0 (success)', () => {
+    test('undefined exitCode is treated as 0 (success)', async () => {
       provider.handleTaskStarted(createStartEvent('build'));
+      await awaitTaskStart(provider);
       provider.handleTaskEnded({ execution: createEndEvent('build').execution, exitCode: undefined });
       assert.strictEqual(provider._taskStates.has('Workspace|build'), false);
+      // Should be tracked as success
+      const result = provider._taskResults.get('Workspace|build');
+      assert.ok(result);
+      assert.strictEqual(result.failed, false);
+      assert.strictEqual(result.exitCode, 0);
     });
   });
 
@@ -104,27 +142,32 @@ suite('Failure Scenario Tests', () => {
   //  Dependency Chain Failures (propagateTaskFailure)
   // -----------------------------------------------------------------------
   suite('Dependency Chain Failures', () => {
-    test('child failure propagates to parent', () => {
+    test('child failure propagates to parent', async () => {
       // Set up parent as running with child subtask
       provider.handleTaskStarted(createStartEvent('parent'));
+      await awaitTaskStart(provider);
       provider.addSubtask('Workspace|parent', 'Workspace|child');
       provider.handleTaskStarted(createStartEvent('child'));
+      await awaitTaskStart(provider);
 
       // Child fails
       provider.handleTaskEnded(createEndEvent('child', 1));
 
-      // Parent should be marked as failed (state cleaned up, failure info persisted)
+      // Parent should be marked as failed via propagateTaskFailure
+      // propagateTaskFailure sets state to 'failed' then deletes it during cleanup
       assert.strictEqual(provider._taskStates.has('Workspace|parent'), false);
-      assert.ok(provider._taskFailures.has('Workspace|parent'));
-      assert.strictEqual(provider._taskFailures.get('Workspace|parent').exitCode, -1);
-      assert.ok(provider._taskFailures.get('Workspace|parent').reason.includes('child'));
+      assert.ok(provider._taskResults.has('Workspace|parent'));
+      assert.strictEqual(provider._taskResults.get('Workspace|parent').exitCode, -1);
+      assert.ok(provider._taskResults.get('Workspace|parent').reason.includes('child'));
     });
 
-    test('propagation terminates parent execution', () => {
+    test('propagation terminates parent execution', async () => {
       const parentEvent = createStartEvent('parent');
       provider.handleTaskStarted(parentEvent);
+      await awaitTaskStart(provider);
       provider.addSubtask('Workspace|parent', 'Workspace|child');
       provider.handleTaskStarted(createStartEvent('child'));
+      await awaitTaskStart(provider);
 
       provider.handleTaskEnded(createEndEvent('child', 1));
 
@@ -132,10 +175,12 @@ suite('Failure Scenario Tests', () => {
       assert.strictEqual(parentEvent.execution._terminated, true);
     });
 
-    test('propagation cleans up parent tracking', () => {
+    test('propagation cleans up parent tracking', async () => {
       provider.handleTaskStarted(createStartEvent('parent'));
+      await awaitTaskStart(provider);
       provider.addSubtask('Workspace|parent', 'Workspace|child');
       provider.handleTaskStarted(createStartEvent('child'));
+      await awaitTaskStart(provider);
 
       provider.handleTaskEnded(createEndEvent('child', 1));
 
@@ -143,54 +188,63 @@ suite('Failure Scenario Tests', () => {
       assert.strictEqual(provider._taskStartTimes.has('Workspace|parent'), false);
     });
 
-    test('propagation posts taskFailed for parent', () => {
+    test('propagation posts taskCompleted for parent with failedDependency', async () => {
       provider.handleTaskStarted(createStartEvent('parent'));
+      await awaitTaskStart(provider);
       provider.addSubtask('Workspace|parent', 'Workspace|child');
       provider.handleTaskStarted(createStartEvent('child'));
+      await awaitTaskStart(provider);
 
       provider.handleTaskEnded(createEndEvent('child', 1));
 
       const msg = view.webview._messages.find(
-        m => m.type === 'taskFailed' && m.taskLabel === 'Workspace|parent'
+        m => m.type === 'taskCompleted' && m.taskLabel === 'Workspace|parent' && m.failed === true
       );
-      assert.ok(msg);
+      assert.ok(msg, 'Expected a taskCompleted message for parent');
       assert.strictEqual(msg.exitCode, -1);
-      assert.ok(msg.failedDependency === 'Workspace|child');
+      assert.strictEqual(msg.failedDependency, 'Workspace|child');
     });
 
-    test('propagation reaches grandparents', () => {
+    test('propagation reaches grandparents', async () => {
       provider.handleTaskStarted(createStartEvent('gp'));
+      await awaitTaskStart(provider);
       provider.addSubtask('Workspace|gp', 'Workspace|parent');
       provider.handleTaskStarted(createStartEvent('parent'));
+      await awaitTaskStart(provider);
       provider.addSubtask('Workspace|parent', 'Workspace|child');
       provider.handleTaskStarted(createStartEvent('child'));
+      await awaitTaskStart(provider);
 
       provider.handleTaskEnded(createEndEvent('child', 1));
 
+      // Both parent and grandparent should have been cleaned up
       assert.strictEqual(provider._taskStates.has('Workspace|parent'), false);
       assert.strictEqual(provider._taskStates.has('Workspace|gp'), false);
     });
 
-    test('propagation is a no-op when parent is not running', () => {
+    test('propagation is a no-op when parent is not running', async () => {
       // Parent not tracked at all
       provider.addSubtask('Workspace|parent', 'Workspace|child');
       provider.handleTaskStarted(createStartEvent('child'));
+      await awaitTaskStart(provider);
       // Should not throw
       provider.handleTaskEnded(createEndEvent('child', 1));
       assert.strictEqual(provider._taskStates.has('Workspace|parent'), false);
     });
 
-    test('failure persists for parent via saveFailedTask', async () => {
+    test('failure persists for parent via saveCompletedTask', async () => {
       provider.handleTaskStarted(createStartEvent('parent'));
+      await awaitTaskStart(provider);
       provider.addSubtask('Workspace|parent', 'Workspace|child');
       provider.handleTaskStarted(createStartEvent('child'));
+      await awaitTaskStart(provider);
 
       provider.handleTaskEnded(createEndEvent('child', 1));
-      await new Promise(r => setTimeout(r, 10));
+      await new Promise(r => setTimeout(r, 20));
 
-      const persisted = await provider.getPersistedFailedTasks();
+      const persisted = await provider.getPersistedCompletedTasks();
       assert.ok(persisted['Workspace|parent']);
-      assert.ok(persisted['Workspace|parent'].failedDependency === 'Workspace|child');
+      assert.strictEqual(persisted['Workspace|parent'].failedDependency, 'Workspace|child');
     });
   });
 
@@ -226,7 +280,7 @@ suite('Failure Scenario Tests', () => {
       provider._taskStates.set('Workspace|build', 'stopped');
       // no execution registered
       await provider.stopTask('Workspace|build');
-      // Should not throw
+      // Should not throw; guard posts a taskStateChanged message
       const msg = view.webview._messages.find(
         m => m.type === 'taskStateChanged' && m.taskLabel === 'Workspace|build'
       );
@@ -237,7 +291,12 @@ suite('Failure Scenario Tests', () => {
     test('stopTask is a no-op for failed tasks', async () => {
       provider._taskStates.set('Workspace|build', 'failed');
       await provider.stopTask('Workspace|build');
-      // Should not throw, state unchanged
+      // Should not throw; guard posts a taskStateChanged message
+      const msg = view.webview._messages.find(
+        m => m.type === 'taskStateChanged' && m.taskLabel === 'Workspace|build'
+      );
+      assert.ok(msg);
+      assert.strictEqual(msg.state, 'failed');
     });
 
     test('stopTask guard prevents concurrent stops (stoppingTasks set)', async () => {
@@ -305,7 +364,7 @@ suite('Failure Scenario Tests', () => {
       assert.strictEqual(child1Exec._terminated, true);
       assert.strictEqual(child2Exec._terminated, true);
 
-      // Hierarchy should be cleaned up (removeSubtask was called correctly)
+      // Hierarchy should be cleaned up
       assert.deepStrictEqual(provider.getTaskHierarchy('Workspace|parent'), []);
 
       // All tasks should be cleaned up from _taskStates
@@ -326,8 +385,6 @@ suite('Failure Scenario Tests', () => {
       await provider.runTask('build');
 
       assert.ok(provider._runningTasks.has('Workspace|build'));
-
-      vscode.tasks._clearTasks();
     });
 
     test('runTask shows error for unknown task', async () => {
@@ -337,17 +394,16 @@ suite('Failure Scenario Tests', () => {
       assert.ok(spy.firstCall.args[0].includes('nonexistent'));
     });
 
-    test('runTask clears persisted failure before executing', async () => {
-      await provider.saveFailedTask('Workspace|build', { exitCode: 1 });
+    test('runTask clears persisted completion before executing', async () => {
+      // Persist a completed task result via the current API
+      await provider.saveCompletedTask('Workspace|build', { exitCode: 1, failed: true });
       const task = new vscode.MockTask('build');
       vscode.tasks._registerTask(task);
 
       await provider.runTask('build');
 
-      const persisted = await provider.getPersistedFailedTasks();
+      const persisted = await provider.getPersistedCompletedTasks();
       assert.strictEqual(persisted['Workspace|build'], undefined);
-
-      vscode.tasks._clearTasks();
     });
 
     test('runTask adds to recently used', async () => {

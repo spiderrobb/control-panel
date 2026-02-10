@@ -30,30 +30,34 @@ suite('Process Lifecycle Tests', () => {
   //  Task State Transitions (via handleTaskStarted / handleTaskEnded)
   // -----------------------------------------------------------------------
   suite('Task State Transitions', () => {
-    test('handleTaskStarted sets state to running', () => {
+    test('handleTaskStarted sets state to running', async () => {
       provider.handleTaskStarted(createStartEvent('build'));
+      await new Promise(r => setTimeout(r, 10));
       assert.strictEqual(provider._taskStates.get('Workspace|build'), 'running');
     });
 
-    test('handleTaskStarted records the execution', () => {
+    test('handleTaskStarted records the execution', async () => {
       const event = createStartEvent('build');
       provider.handleTaskStarted(event);
+      await new Promise(r => setTimeout(r, 10));
       assert.ok(provider._runningTasks.has('Workspace|build'));
       assert.strictEqual(provider._runningTasks.get('Workspace|build'), event.execution);
     });
 
-    test('handleTaskStarted records start time', () => {
+    test('handleTaskStarted records start time', async () => {
       const before = Date.now();
       provider.handleTaskStarted(createStartEvent('build'));
+      await new Promise(r => setTimeout(r, 10));
       const after = Date.now();
       const startTime = provider._taskStartTimes.get('Workspace|build');
       assert.ok(startTime >= before && startTime <= after);
     });
 
-    test('handleTaskStarted clears previous failure', () => {
-      provider._taskFailures.set('Workspace|build', { exitCode: 1, reason: 'old' });
+    test('handleTaskStarted clears previous result', async () => {
+      provider._taskResults.set('Workspace|build', { exitCode: 1, reason: 'old' });
       provider.handleTaskStarted(createStartEvent('build'));
-      assert.strictEqual(provider._taskFailures.has('Workspace|build'), false);
+      await new Promise(r => setTimeout(r, 10));
+      assert.strictEqual(provider._taskResults.has('Workspace|build'), false);
     });
 
     test('handleTaskStarted posts taskStarted to webview', async () => {
@@ -77,8 +81,9 @@ suite('Process Lifecycle Tests', () => {
       assert.strictEqual(provider._taskStates.has('Workspace|build'), false);
     });
 
-    test('handleTaskEnded cleans up runningTasks and startTimes', () => {
+    test('handleTaskEnded cleans up runningTasks and startTimes', async () => {
       provider.handleTaskStarted(createStartEvent('build'));
+      await new Promise(r => setTimeout(r, 10));
       assert.ok(provider._runningTasks.has('Workspace|build'));
       assert.ok(provider._taskStartTimes.has('Workspace|build'));
       provider.handleTaskEnded(createEndEvent('build', 0));
@@ -86,20 +91,24 @@ suite('Process Lifecycle Tests', () => {
       assert.strictEqual(provider._taskStartTimes.has('Workspace|build'), false);
     });
 
-    test('handleTaskEnded posts taskEnded for success', () => {
+    test('handleTaskEnded posts taskCompleted for success', async () => {
       provider.handleTaskStarted(createStartEvent('build'));
+      await new Promise(r => setTimeout(r, 10));
       provider.handleTaskEnded(createEndEvent('build', 0));
-      const ended = view.webview._messages.find(m => m.type === 'taskEnded' && m.taskLabel === 'Workspace|build');
-      assert.ok(ended);
-      assert.strictEqual(ended.exitCode, 0);
+      const completed = view.webview._messages.find(m => m.type === 'taskCompleted' && m.taskLabel === 'Workspace|build');
+      assert.ok(completed);
+      assert.strictEqual(completed.exitCode, 0);
+      assert.strictEqual(completed.failed, false);
     });
 
-    test('handleTaskEnded posts taskFailed for failure', () => {
+    test('handleTaskEnded posts taskCompleted with failed flag for failure', async () => {
       provider.handleTaskStarted(createStartEvent('build'));
+      await new Promise(r => setTimeout(r, 10));
       provider.handleTaskEnded(createEndEvent('build', 2));
-      const failed = view.webview._messages.find(m => m.type === 'taskFailed' && m.taskLabel === 'Workspace|build');
-      assert.ok(failed);
-      assert.strictEqual(failed.exitCode, 2);
+      const completed = view.webview._messages.find(m => m.type === 'taskCompleted' && m.taskLabel === 'Workspace|build');
+      assert.ok(completed);
+      assert.strictEqual(completed.exitCode, 2);
+      assert.strictEqual(completed.failed, true);
     });
   });
 
@@ -301,17 +310,17 @@ suite('Process Lifecycle Tests', () => {
   // -----------------------------------------------------------------------
   //  Failed Tasks Persistence
   // -----------------------------------------------------------------------
-  suite('Failed Tasks Persistence', () => {
+  suite('Completed Tasks Persistence', () => {
     test('save and retrieve round-trip', async () => {
-      await provider.saveFailedTask('Workspace|build', { exitCode: 1, reason: 'error' });
-      const f = await provider.getPersistedFailedTasks();
+      await provider.saveCompletedTask('Workspace|build', { exitCode: 1, failed: true, reason: 'error' });
+      const f = await provider.getPersistedCompletedTasks();
       assert.strictEqual(f['Workspace|build'].exitCode, 1);
     });
 
-    test('clearFailedTask removes entry', async () => {
-      await provider.saveFailedTask('Workspace|build', { exitCode: 1 });
-      await provider.clearFailedTask('Workspace|build');
-      const f = await provider.getPersistedFailedTasks();
+    test('clearCompletedTask removes entry', async () => {
+      await provider.saveCompletedTask('Workspace|build', { exitCode: 1, failed: true });
+      await provider.clearCompletedTask('Workspace|build');
+      const f = await provider.getPersistedCompletedTasks();
       assert.strictEqual(f['Workspace|build'], undefined);
     });
   });

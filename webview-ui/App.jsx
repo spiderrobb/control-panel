@@ -528,6 +528,7 @@ function ControlPanel() {
           onFocus={onFocus}
           onOpenDefinition={onOpenDefinition}
           onDismiss={onDismissTask}
+          onRestart={onRun}
           onShowLogs={handleShowLogs}
           onRequestLogBuffer={handleRequestLogBuffer}
           logBuffer={logBuffer}

@@ -31,6 +31,7 @@ suite('Integration Stress Tests', () => {
   });
 
   teardown(() => {
+    provider.dispose();
     sandbox.restore();
     vscode.tasks._clearTasks();
   });
@@ -363,23 +364,28 @@ suite('Integration Stress Tests', () => {
   //  Bulk start/end stress
   // -----------------------------------------------------------------------
   suite('System Stability Under Load', () => {
-    test('100 rapid task start/end cycles', () => {
+    test('100 rapid task start/end cycles', async () => {
       for (let i = 0; i < 100; i++) {
         const label = `task-${i}`;
         provider.handleTaskStarted(createStartEvent(label));
+        // Await the start queue so _handleTaskStartedImpl populates state
+        // before the synchronous handleTaskEnded reads it
+        await provider._taskStartQueue;
         provider.handleTaskEnded(createEndEvent(label, i % 5 === 0 ? 1 : 0));
       }
       assert.strictEqual(provider._runningTasks.size, 0);
       assert.strictEqual(provider._taskStartTimes.size, 0);
     });
 
-    test('webview receives messages for all task events', () => {
+    test('webview receives messages for all task events', async () => {
       for (let i = 0; i < 10; i++) {
         provider.handleTaskStarted(createStartEvent(`t-${i}`));
+        // Await the start queue so state is populated before end is processed
+        await provider._taskStartQueue;
         provider.handleTaskEnded(createEndEvent(`t-${i}`, 0));
       }
-      const endedMsgs = view.webview._messages.filter(m => m.type === 'taskEnded');
-      assert.strictEqual(endedMsgs.length, 10);
+      const completedMsgs = view.webview._messages.filter(m => m.type === 'taskCompleted');
+      assert.strictEqual(completedMsgs.length, 10);
     });
   });
 });

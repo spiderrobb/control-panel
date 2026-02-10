@@ -268,28 +268,28 @@ body {
 }
 
 .segment-children-parallel {
-  flex-direction: column;
+  flex-direction: row;
 }
 
 .segment-children-sequential {
-  flex-direction: row;
+  flex-direction: column;
 }
 
 /* Borders between children */
 .segment-children-parallel > .segment {
-  border-top: 1px solid rgba(128, 128, 128, 0.25);
-}
-
-.segment-children-parallel > .segment:first-child {
-  border-top: none;
-}
-
-.segment-children-sequential > .segment {
   border-left: 1px solid rgba(128, 128, 128, 0.25);
 }
 
-.segment-children-sequential > .segment:first-child {
+.segment-children-parallel > .segment:first-child {
   border-left: none;
+}
+
+.segment-children-sequential > .segment {
+  border-top: 1px solid rgba(128, 128, 128, 0.25);
+}
+
+.segment-children-sequential > .segment:first-child {
+  border-top: none;
 }
 
 /* Border between cell and children */
@@ -783,10 +783,11 @@ body {
   font-size: 0.75em;
   padding: 2px 6px;
   border-radius: 3px;
-  background-color: var(--vscode-charts-green);
-  color: var(--vscode-editor-background);
-  font-weight: 600;
+  background-color: transparent;
+  color: var(--vscode-descriptionForeground, #888);
+  font-weight: 400;
   white-space: nowrap;
+  opacity: 0.75;
 }
 
 .task-name {
