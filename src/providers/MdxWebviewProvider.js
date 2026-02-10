@@ -10,10 +10,11 @@ class MdxWebviewProvider {
     this._runningTasks = new Map(); // Map<label, execution>
     this._taskHierarchy = new Map(); // Map<parentLabel, Set<childLabel>>
     this._taskStartTimes = new Map(); // Map<label, timestamp>
-    this._taskFailures = new Map(); // Map<label, {exitCode, reason}>
+    this._taskResults = new Map(); // Map<label, {exitCode, reason, failed}>
     this._taskStates = new Map(); // Map<label, 'starting'|'running'|'stopping'|'stopped'|'failed'>
     this._stoppingTasks = new Set(); // Set<label> - tracks tasks currently being stopped to prevent circular dependencies
     this._cancelledTasks = new Set(); // Set<label> - tasks cancelled by stopTask; handleTaskStarted/Ended will ignore them
+    this._ensureParentPromises = new Map(); // Map<label, Promise> - deduplicates concurrent ensureParentRunning calls
     this._stateMutex = Promise.resolve(); // Async mutex for global state read-modify-write operations
     
     // Watch for task execution changes
@@ -151,24 +152,54 @@ class MdxWebviewProvider {
     });
   }
 
-  // Failed tasks persistence (workspace-specific)
-  async getPersistedFailedTasks() {
-    return this._context.workspaceState.get('failedTasks', {});
+  // Completed tasks persistence (workspace-specific) — stores both successes and failures
+  async getPersistedCompletedTasks() {
+    // Migrate legacy 'failedTasks' key on first access
+    const legacy = this._context.workspaceState.get('failedTasks', null);
+    if (legacy) {
+      const current = this._context.workspaceState.get('completedTasks', {});
+      const merged = { ...legacy, ...current };
+      await this._context.workspaceState.update('completedTasks', merged);
+      await this._context.workspaceState.update('failedTasks', undefined);
+      return merged;
+    }
+    return this._context.workspaceState.get('completedTasks', {});
   }
 
-  async saveFailedTask(label, failureInfo) {
+  async saveCompletedTask(label, resultInfo) {
     return this._withStateLock(async () => {
-      const failed = await this.getPersistedFailedTasks();
-      failed[label] = failureInfo;
-      await this._context.workspaceState.update('failedTasks', failed);
+      const completed = await this.getPersistedCompletedTasks();
+      completed[label] = resultInfo;
+      await this._context.workspaceState.update('completedTasks', completed);
     });
   }
 
-  async clearFailedTask(label) {
+  async clearCompletedTask(label) {
     return this._withStateLock(async () => {
-      const failed = await this.getPersistedFailedTasks();
-      delete failed[label];
-      await this._context.workspaceState.update('failedTasks', failed);
+      const completed = await this.getPersistedCompletedTasks();
+      // Recursively collect all child labels to dismiss
+      const toDismiss = new Set();
+      const collectChildren = (taskLabel) => {
+        if (toDismiss.has(taskLabel)) return;
+        toDismiss.add(taskLabel);
+        // Check in-memory hierarchy
+        const hierarchyChildren = this.getTaskHierarchy(taskLabel);
+        for (const child of hierarchyChildren) {
+          collectChildren(child);
+        }
+        // Also check persisted subtasks (in case hierarchy was already cleaned up)
+        const persisted = completed[taskLabel];
+        if (persisted?.subtasks) {
+          for (const child of persisted.subtasks) {
+            collectChildren(child);
+          }
+        }
+      };
+      collectChildren(label);
+      for (const taskLabel of toDismiss) {
+        delete completed[taskLabel];
+      }
+      await this._context.workspaceState.update('completedTasks', completed);
     });
   }
 
@@ -303,6 +334,43 @@ class MdxWebviewProvider {
     return depIds;
   }
 
+  /**
+   * Recursively register the full dependency tree for a task.
+   * Walks all dependsOn children and their children, populating
+   * _taskHierarchy at every level so the UI can render the full tree.
+   * @param {string} taskId - The task ID to register deps for
+   * @param {Array} [allTasks] - Pre-fetched tasks array (avoids redundant fetchTasks calls)
+   * @param {Set} [visited] - Tracks visited IDs to prevent infinite loops
+   */
+  async registerDependencyTree(taskId, allTasks, visited) {
+    if (!allTasks) {
+      allTasks = await vscode.tasks.fetchTasks();
+    }
+    if (!visited) {
+      visited = new Set();
+    }
+    if (visited.has(taskId)) return;
+    visited.add(taskId);
+
+    const task = allTasks.find(t => this.getTaskId(t) === taskId);
+    if (!task) return;
+
+    const dependencies = await this.getTaskDependencies(task);
+    for (const dep of dependencies) {
+      const depName = this.normalizeDependencyLabel(dep);
+      if (!depName) continue;
+      const depTask = this._resolveTaskByName(allTasks, depName);
+      if (!depTask) continue;
+      const depId = this.getTaskId(depTask);
+      if (depId === taskId) continue;
+
+      this.addSubtask(taskId, depId);
+
+      // Recurse into this child to register its own children
+      await this.registerDependencyTree(depId, allTasks, visited);
+    }
+  }
+
   // Discover parent tasks for a given task ID by checking both active task
   // executions and all workspace tasks. When a task is started as a dependency
   // (e.g. via VS Code's native task runner or command palette), the parent-child
@@ -373,25 +441,73 @@ class MdxWebviewProvider {
 
         // Also register the parent's own dependencies recursively
         await this.registerTaskDependencies(candidateId);
+
+        // Recurse upward: the discovered parent may itself be a child
+        // of a grandparent (e.g. stage-1 is a child of pipeline).
+        await this.discoverParentTasks(candidateId);
       }
     }
   }
 
   async ensureParentRunning(parentId) {
     const currentState = this._taskStates.get(parentId);
-    const currentExecution = this._runningTasks.get(parentId);
 
-    // If parent already running with real execution, no-op
-    if (currentState === 'running' && currentExecution) {
+    // If parent was already fully set up by a prior call (or by
+    // handleTaskStarted), no-op.
+    if (currentState === 'running') {
+      // If there's an in-flight promise from a concurrent call that
+      // hasn't finished sending messages yet, wait for it.
+      const inflight = this._ensureParentPromises.get(parentId);
+      if (inflight) await inflight;
       return;
     }
 
+    // If another concurrent caller is already setting up this parent,
+    // just wait for that same promise instead of duplicating work.
+    const existing = this._ensureParentPromises.get(parentId);
+    if (existing) {
+      await existing;
+      return;
+    }
+
+    // Mark running IMMEDIATELY before any async work so concurrent
+    // callers see it and await our promise instead of duplicating.
     const startTime = this._taskStartTimes.get(parentId) || Date.now();
     this._taskStartTimes.set(parentId, startTime);
     this._taskStates.set(parentId, 'running');
 
     if (!this._runningTasks.has(parentId)) {
       this._runningTasks.set(parentId, null);
+    }
+
+    // Store the setup promise so concurrent callers can await it.
+    const setupPromise = this._doEnsureParentRunning(parentId, startTime);
+    this._ensureParentPromises.set(parentId, setupPromise);
+
+    try {
+      await setupPromise;
+    } finally {
+      this._ensureParentPromises.delete(parentId);
+    }
+  }
+
+  async _doEnsureParentRunning(parentId, startTime) {
+    // Walk up: if this parent is itself a child of a grandparent, ensure
+    // the grandparent is running first so the full chain is visible.
+    let grandparentId = null;
+    for (const [ancestorId, ancestorChildren] of this._taskHierarchy) {
+      if (ancestorChildren.has(parentId)) {
+        grandparentId = ancestorId;
+        await this.ensureParentRunning(ancestorId);
+        // Notify webview of the grandparent → parent link
+        this._view?.webview.postMessage({
+          type: 'subtaskStarted',
+          parentLabel: ancestorId,
+          childLabel: parentId,
+          parentStartTime: this._taskStartTimes.get(ancestorId) || Date.now()
+        });
+        break; // a task has at most one direct parent
+      }
     }
 
     const history = await this.getTaskHistory(parentId);
@@ -407,7 +523,8 @@ class MdxWebviewProvider {
       isFirstRun: history.count === 0,
       subtasks,
       state: 'running',
-      isDependencyProxy: true
+      isDependencyProxy: true,
+      parentTask: grandparentId
     });
 
     this._view?.webview.postMessage({
@@ -448,27 +565,38 @@ class MdxWebviewProvider {
     // Re-send taskStarted messages for tasks that are still running
     // This handles the case where the webview is hidden/shown or extension view is switched
     
+    // Helper: find this task's parent in the hierarchy
+    const findParent = (taskLabel) => {
+      for (const [parentId, children] of this._taskHierarchy) {
+        if (children.has(taskLabel)) return parentId;
+      }
+      return null;
+    };
+
     // Restore running tasks
     for (const [label, execution] of this._runningTasks.entries()) {
       const startTime = this._taskStartTimes.get(label);
       const state = this._taskStates.get(label);
-      const failureInfo = this._taskFailures.get(label);
+      const resultInfo = this._taskResults.get(label);
       
       if (!startTime) continue;
 
       const history = await this.getTaskHistory(label);
       const avgDuration = this.getAverageDuration(history.durations);
       const subtasks = this.getTaskHierarchy(label);
+      const parentTask = findParent(label);
 
       // Send appropriate message based on current state
-      if (failureInfo) {
+      if (resultInfo) {
         this._view?.webview.postMessage({
-          type: 'taskFailed',
+          type: 'taskCompleted',
           taskLabel: label,
-          exitCode: failureInfo.exitCode,
-          reason: failureInfo.reason,
+          exitCode: resultInfo.exitCode,
+          failed: resultInfo.failed,
+          reason: resultInfo.reason,
           duration: Date.now() - startTime,
-          subtasks
+          subtasks,
+          parentTask: resultInfo.parentTask || parentTask
         });
       } else {
         this._view?.webview.postMessage({
@@ -479,24 +607,27 @@ class MdxWebviewProvider {
           avgDuration,
           isFirstRun: history.count === 0,
           subtasks,
-          state: state || 'running'
+          state: state || 'running',
+          parentTask
         });
       }
     }
 
-    // Restore persisted failed tasks
-    const persistedFailures = await this.getPersistedFailedTasks();
-    for (const [label, failureInfo] of Object.entries(persistedFailures)) {
+    // Restore persisted completed tasks (successes and failures)
+    const persistedCompleted = await this.getPersistedCompletedTasks();
+    for (const [label, resultInfo] of Object.entries(persistedCompleted)) {
       // Only restore if not currently running
       if (!this._runningTasks.has(label)) {
         this._view?.webview.postMessage({
-          type: 'taskFailed',
+          type: 'taskCompleted',
           taskLabel: label,
-          exitCode: failureInfo.exitCode,
-          reason: failureInfo.reason,
-          duration: failureInfo.duration || 0,
-          subtasks: failureInfo.subtasks || [],
-          failedDependency: failureInfo.failedDependency
+          exitCode: resultInfo.exitCode,
+          failed: resultInfo.failed,
+          reason: resultInfo.reason,
+          duration: resultInfo.duration || 0,
+          subtasks: resultInfo.subtasks || [],
+          failedDependency: resultInfo.failedDependency,
+          parentTask: resultInfo.parentTask || null
         });
       }
     }
@@ -594,7 +725,7 @@ class MdxWebviewProvider {
           break;
         }
         case 'dismissTask':
-          await this.clearFailedTask(message.label);
+          await this.clearCompletedTask(message.label);
           break;
         case 'showLogs':
           this._logger.show();
@@ -1051,7 +1182,7 @@ class MdxWebviewProvider {
           this._cancelledTasks.delete(childId);
           this._taskStates.delete(childId);
           this._taskStartTimes.delete(childId);
-          this._taskFailures.delete(childId);
+          this._taskResults.delete(childId);
           this._stoppingTasks.delete(childId);
         }
       }
@@ -1059,32 +1190,18 @@ class MdxWebviewProvider {
       this._taskHierarchy.delete(taskId);
       this._taskStates.delete(taskId);
       this._taskStartTimes.delete(taskId);
-      this._taskFailures.delete(taskId);
+      this._taskResults.delete(taskId);
       this._stoppingTasks.delete(taskId);
 
-      // Clear persisted failure record
-      await this.clearFailedTask(taskId);
+      // Clear persisted completion record
+      await this.clearCompletedTask(taskId);
 
-      // Check if task has dependencies
-      const dependencies = await this.getTaskDependencies(task);
-      let subtasks = [];
-      
-      if (dependencies.length > 0) {
-        // Register dependencies as subtasks
-        dependencies.forEach(dep => {
-          const depName = this.normalizeDependencyLabel(dep);
-          if (depName) {
-            const depTask = this._resolveTaskByName(tasks, depName);
-            if (depTask) {
-              const depId = this.getTaskId(depTask);
-              if (depId !== taskId) {
-                this.addSubtask(taskId, depId);
-                subtasks.push(depId);
-              }
-            }
-          }
-        });
-      }
+      // Register the full dependency tree recursively so the hierarchy
+      // is fully populated before VS Code starts firing onDidStartTaskProcess
+      // events for leaf tasks.
+      const tasks_list = await vscode.tasks.fetchTasks();
+      await this.registerDependencyTree(taskId, tasks_list);
+      const subtasks = this.getTaskHierarchy(taskId);
       
       const execution = await vscode.tasks.executeTask(task);
       this._runningTasks.set(taskId, execution);
@@ -1217,7 +1334,7 @@ class MdxWebviewProvider {
         this._taskStartTimes.delete(descId);
         this._taskHierarchy.delete(descId);
         this._taskStates.delete(descId);
-        this._taskFailures.delete(descId);
+        this._taskResults.delete(descId);
         this._stoppingTasks.delete(descId);
 
         // Notify webview that descendant is stopped
@@ -1435,7 +1552,16 @@ class MdxWebviewProvider {
     }
   }
 
-  async handleTaskStarted(event) {
+  handleTaskStarted(event) {
+    // Serialize all task-start handling through a queue so that concurrent
+    // onDidStartTaskProcess events (e.g. 3 parallel leaf tasks) don't
+    // interleave and cause children to appear before their parents.
+    this._taskStartQueue = (this._taskStartQueue || Promise.resolve())
+      .then(() => this._handleTaskStartedImpl(event))
+      .catch(err => this._logger.error('Error in handleTaskStarted:', err));
+  }
+
+  async _handleTaskStartedImpl(event) {
     // Extract unique identifier
     const taskId = this.getTaskId(event.execution.task);
     const currentState = this._taskStates.get(taskId);
@@ -1461,10 +1587,10 @@ class MdxWebviewProvider {
     this._taskStartTimes.set(taskId, startTime);
     this._taskStates.set(taskId, 'running');
     this._runningTasks.set(taskId, event.execution);
-    // Clear any previous failure state
-    this._taskFailures.delete(taskId);
-    // Clear persisted failure
-    this.clearFailedTask(taskId);
+    // Clear any previous result state
+    this._taskResults.delete(taskId);
+    // Clear persisted completion record
+    this.clearCompletedTask(taskId);
     
     // Register this task's own dependencies (handles nested chains)
     try {
@@ -1483,12 +1609,18 @@ class MdxWebviewProvider {
       this._logger.warn(`Failed to discover parent tasks for ${taskId}:`, error);
     }
 
-    // Check if this task is a subtask of any running task
-    this._taskHierarchy.forEach((subtasks, parentId) => {
+    // Check if this task is a subtask of any running task.
+    // We await ensureParentRunning so the parent's taskStarted message is
+    // guaranteed to reach the webview before the child's.
+    let parentTaskId = null;
+    for (const [parentId, subtasks] of this._taskHierarchy) {
       if (subtasks.has(taskId)) {
-        this.ensureParentRunning(parentId).catch(err => {
+        parentTaskId = parentId;
+        try {
+          await this.ensureParentRunning(parentId);
+        } catch (err) {
           this._logger.warn(`Failed to ensure parent task running for ${parentId}:`, err);
-        });
+        }
         // Notify webview that a subtask started
         this._view?.webview.postMessage({
           type: 'subtaskStarted',
@@ -1496,22 +1628,23 @@ class MdxWebviewProvider {
           childLabel: taskId,
           parentStartTime: this._taskStartTimes.get(parentId) || Date.now()
         });
+        break; // a task has at most one direct parent
       }
-    });
+    }
     
     // Get task history for progress estimation
-    this.getTaskHistory(taskId).then(history => {
-      const avgDuration = this.getAverageDuration(history.durations);
-      
-      this._view?.webview.postMessage({
-        type: 'taskStarted',
-        taskLabel: taskId,
-        execution: event.execution,
-        startTime,
-        avgDuration,
-        isFirstRun: history.count === 0,
-        subtasks: this.getTaskHierarchy(taskId)
-      });
+    const history = await this.getTaskHistory(taskId).catch(() => ({ count: 0, durations: [] }));
+    const avgDuration = this.getAverageDuration(history.durations);
+    
+    this._view?.webview.postMessage({
+      type: 'taskStarted',
+      taskLabel: taskId,
+      execution: event.execution,
+      startTime,
+      avgDuration,
+      isFirstRun: history.count === 0,
+      subtasks: this.getTaskHierarchy(taskId),
+      parentTask: parentTaskId
     });
   }
 
@@ -1530,7 +1663,7 @@ class MdxWebviewProvider {
       this._taskStartTimes.delete(taskId);
       this._taskHierarchy.delete(taskId);
       this._taskStates.delete(taskId);
-      this._taskFailures.delete(taskId);
+      this._taskResults.delete(taskId);
       this._cancelledTasks.delete(taskId);
       return;
     }
@@ -1565,7 +1698,7 @@ class MdxWebviewProvider {
       duration,
       exitCode,
       failed,
-      reason: failed ? (this._taskFailures.get(taskId)?.reason || 'Task exited with non-zero code') : null,
+      reason: failed ? (this._taskResults.get(taskId)?.reason || 'Task exited with non-zero code') : null,
       parentLabel: parentId,
       childLabels: subtasks
     };
@@ -1580,19 +1713,19 @@ class MdxWebviewProvider {
       this.updateTaskHistory(taskId, duration);
     }
     
-    // Track failure if task failed
-    if (failed) {
-      const failureInfo = {
-        exitCode,
-        reason: 'Task exited with non-zero code',
-        timestamp: Date.now(),
-        duration,
-        subtasks
-      };
-      this._taskFailures.set(taskId, failureInfo);
-      // Persist failure so it survives view changes
-      this.saveFailedTask(taskId, failureInfo);
-    }
+    // Track result for all completed tasks (success or failure)
+    const resultInfo = {
+      exitCode,
+      failed,
+      reason: failed ? 'Task exited with non-zero code' : null,
+      timestamp: Date.now(),
+      duration,
+      subtasks,
+      parentTask: parentId
+    };
+    this._taskResults.set(taskId, resultInfo);
+    // Persist so it survives view changes — user must explicitly dismiss
+    this.saveCompletedTask(taskId, resultInfo);
     
     // Check if this task is a subtask of any running task
     const parentTasks = [];
@@ -1623,25 +1756,17 @@ class MdxWebviewProvider {
     this._taskHierarchy.delete(taskId);
     this._taskStates.delete(taskId);
     
-    // Send appropriate message based on success/failure
-    if (failed) {
-      this._view?.webview.postMessage({
-        type: 'taskFailed',
-        taskLabel: taskId,
-        exitCode,
-        reason: this._taskFailures.get(taskId)?.reason || 'Task failed',
-        duration,
-        subtasks
-      });
-    } else {
-      this._view?.webview.postMessage({
-        type: 'taskEnded',
-        taskLabel: taskId,
-        exitCode,
-        duration,
-        subtasks
-      });
-    }
+    // Send unified completion message for both success and failure
+    this._view?.webview.postMessage({
+      type: 'taskCompleted',
+      taskLabel: taskId,
+      exitCode,
+      failed,
+      reason: this._taskResults.get(taskId)?.reason || null,
+      duration,
+      subtasks,
+      parentTask: parentId
+    });
   }
 
   propagateTaskFailure(parentId, failedSubtaskId, exitCode) {
@@ -1653,19 +1778,29 @@ class MdxWebviewProvider {
     const duration = Date.now() - startTime;
     const subtasks = this.getTaskHierarchy(parentId);
 
+    // Find grandparent early so we can include it in persisted info
+    let parentOfParent = null;
+    this._taskHierarchy.forEach((children, possibleParent) => {
+      if (children.has(parentId)) {
+        parentOfParent = possibleParent;
+      }
+    });
+
     // Set failure state for parent
     this._taskStates.set(parentId, 'failed');
     const failureInfo = {
       exitCode: -1, // Special code for dependency failure
+      failed: true,
       reason: `Dependency failed: ${failedSubtaskId} (exit code ${exitCode})`,
       failedDependency: failedSubtaskId,
       timestamp: Date.now(),
       duration,
-      subtasks
+      subtasks,
+      parentTask: parentOfParent
     };
-    this._taskFailures.set(parentId, failureInfo);
-    // Persist failure so it survives view changes
-    this.saveFailedTask(parentId, failureInfo);
+    this._taskResults.set(parentId, failureInfo);
+    // Persist so it survives view changes — user must explicitly dismiss
+    this.saveCompletedTask(parentId, failureInfo);
 
     // Terminate the parent task if it actually started
     if (parentExecution) {
@@ -1680,22 +1815,18 @@ class MdxWebviewProvider {
 
     // Notify webview
     this._view?.webview.postMessage({
-      type: 'taskFailed',
+      type: 'taskCompleted',
       taskLabel: parentId,
       exitCode: -1,
+      failed: true,
       reason: `Dependency failed: ${failedSubtaskId}`,
       failedDependency: failedSubtaskId,
       duration,
-      subtasks
+      subtasks,
+      parentTask: parentOfParent
     });
 
     // Record failure in execution history even if parent never started
-    let parentOfParent = null;
-    this._taskHierarchy.forEach((children, possibleParent) => {
-      if (children.has(parentId)) {
-        parentOfParent = possibleParent;
-      }
-    });
 
     const executionRecord = {
       id: `${parentId}-${startTime}`,

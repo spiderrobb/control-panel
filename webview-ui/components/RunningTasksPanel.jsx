@@ -6,12 +6,13 @@ import LinearProgress from '@mui/material/LinearProgress';
 import StopIcon from '@mui/icons-material/Stop';
 import BoltIcon from '@mui/icons-material/Bolt';
 import CloseIcon from '@mui/icons-material/Close';
+import ClearAllIcon from '@mui/icons-material/ClearAll';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 
 function RunningTasksPanel({ runningTasks, allTasks, onStop, onFocus, onOpenDefinition, onDismiss, onShowLogs, onRequestLogBuffer, logBuffer, isCollapsed, onToggleCollapsed }) {
   const [showDebug, setShowDebug] = useState(false);
-  const runningTasksList = Object.entries(runningTasks).filter(([_, state]) => state.running || state.failed);
+  const runningTasksList = Object.entries(runningTasks).filter(([_, state]) => state.running || state.failed || state.completed);
 
   // Request fresh log buffer whenever debug panel is opened
   useEffect(() => {
@@ -35,6 +36,11 @@ function RunningTasksPanel({ runningTasks, allTasks, onStop, onFocus, onOpenDefi
   // Filter to only show root-level tasks (those without a parent)
   const rootTasks = runningTasksList.filter(([_label, state]) => !state.parentTask);
 
+  const dismissibleTasks = runningTasksList.filter(([_, state]) => state.completed || state.failed);
+  const handleClearAll = () => {
+    dismissibleTasks.forEach(([taskLabel]) => onDismiss(taskLabel));
+  };
+
   const getLevelColor = (level) => {
     switch (level) {
       case 'ERROR': return 'var(--vscode-errorForeground, #f44747)';
@@ -50,6 +56,18 @@ function RunningTasksPanel({ runningTasks, allTasks, onStop, onFocus, onOpenDefi
       <div className="panel-header">
         <h3>Running Tasks ({runningTasksList.length})</h3>
         <div style={{ display: 'flex', gap: '4px', marginLeft: 'auto' }}>
+          <Tooltip title="Clear all completed and failed tasks">
+            <span>
+              <IconButton
+                size="small"
+                onClick={handleClearAll}
+                disabled={dismissibleTasks.length === 0}
+                sx={{ p: 0.5 }}
+              >
+                <ClearAllIcon sx={{ fontSize: 18 }} />
+              </IconButton>
+            </span>
+          </Tooltip>
           <Tooltip title={isCollapsed ? 'Expand' : 'Collapse'}>
             <IconButton
               size="small"
@@ -168,9 +186,11 @@ function RunningTaskItem({ label, state, onStop, onFocus, onOpenDefinition, onDi
   const subtasks = state?.subtasks || [];
   const parentTaskLabel = state?.parentTask || null;
   const isFailed = state?.failed || false;
+  const isCompleted = state?.completed || false;
   const exitCode = state?.exitCode;
   const failureReason = state?.failureReason;
   const failedDependency = state?.failedDependency;
+  const completedDuration = state?.duration;
   const canStop = state?.canStop !== false;
   const canFocus = state?.canFocus !== false;
   const taskState = state?.state; // 'starting'|'running'|'stopping'|'stopped'|'failed'
@@ -205,14 +225,27 @@ function RunningTaskItem({ label, state, onStop, onFocus, onOpenDefinition, onDi
     return `${seconds}s`;
   };
 
+  const formatDuration = (ms) => {
+    const seconds = Math.floor(ms / 1000);
+    const minutes = Math.floor(seconds / 60);
+    const hours = Math.floor(minutes / 60);
+
+    if (hours > 0) {
+      return `${hours}h ${minutes % 60}m`;
+    } else if (minutes > 0) {
+      return `${minutes}m ${seconds % 60}s`;
+    }
+    return `${seconds}s`;
+  };
+
   return (
     <>
       <div className="running-task-row" style={{ paddingLeft: `${16 + depth * 20}px` }}>
         <div className="task-row-content">
           <div className="task-info">
-            <span className={`status-dot ${isFailed ? 'failed' : ''}`}></span>
+            <span className={`status-dot ${isFailed ? 'failed' : isCompleted ? 'succeeded' : ''}`}></span>
             <div className="task-name-container">
-              {parentTaskLabel && (
+              {depth === 0 && parentTaskLabel && (
                 <span className="parent-task-name">{getDisplayLabel(parentTaskLabel)}</span>
               )}
               <span 
@@ -230,6 +263,15 @@ function RunningTaskItem({ label, state, onStop, onFocus, onOpenDefinition, onDi
                   <span className="task-dependency-error" title={`Dependency "${getDisplayLabel(failedDependency)}" failed`}>
                     ← {getDisplayLabel(failedDependency)}
                   </span>
+                )}
+              </>
+            ) : isCompleted ? (
+              <>
+                <span className="task-success-badge">
+                  ✓ Completed
+                </span>
+                {completedDuration != null && (
+                  <span className="task-runtime">{formatDuration(completedDuration)}</span>
                 )}
               </>
             ) : (
@@ -254,8 +296,8 @@ function RunningTaskItem({ label, state, onStop, onFocus, onOpenDefinition, onDi
                 </IconButton>
               </span>
             </Tooltip>
-            {isFailed ? (
-              <Tooltip title="Dismiss failed task">
+            {isCompleted && depth === 0 ? (
+              <Tooltip title="Dismiss">
                 <span>
                   <IconButton
                     size="small"
@@ -266,30 +308,30 @@ function RunningTaskItem({ label, state, onStop, onFocus, onOpenDefinition, onDi
                   </IconButton>
                 </span>
               </Tooltip>
-            ) : (
+            ) : !isCompleted ? (
               <Tooltip title={isStopping ? "Stopping..." : (canStop ? "Stop task" : "Cannot stop task")}>
                 <span>
                   <IconButton
                     size="small"
                     onClick={() => onStop(label)}
-                    disabled={!canStop || isFailed || isStopping}
+                    disabled={!canStop || isStopping}
                     sx={{ p: 0.5 }}
                   >
                     <StopIcon sx={{ fontSize: 16 }} />
                   </IconButton>
                 </span>
               </Tooltip>
-            )}
+            ) : null}
           </div>
         </div>
-        {!isFailed && avgDuration && !isFirstRun && runtime <= 60000 && (
+        {!isCompleted && avgDuration && !isFirstRun && runtime <= 60000 && (
           <LinearProgress
             variant="determinate"
             value={progress}
             sx={{ width: '100%', height: 4, mt: 0.5 }}
           />
         )}
-        {!isFailed && isFirstRun && (
+        {!isCompleted && isFirstRun && (
           <LinearProgress
             sx={{ width: '100%', height: 4, mt: 0.5 }}
           />
@@ -298,14 +340,13 @@ function RunningTaskItem({ label, state, onStop, onFocus, onOpenDefinition, onDi
       
       {subtasks.map((subtask, index) => {
         const subtaskState = allRunningTasks?.[subtask];
-        if (!subtaskState?.running) {
-          // Show waiting subtask
+        if (!subtaskState || (!subtaskState.running && !subtaskState.completed && !subtaskState.failed)) {
+          // No entry or not yet started — show waiting placeholder
           return (
-            <div key={index} className="running-task-row waiting" style={{ paddingLeft: `${16 + (depth + 1) * 20}px` }}>
+            <div key={subtask || index} className="running-task-row waiting" style={{ paddingLeft: `${16 + (depth + 1) * 20}px` }}>
               <div className="task-info">
                 <span className="status-dot waiting"></span>
                 <div className="task-name-container">
-                  <span className="parent-task-name">{getDisplayLabel(label)}</span>
                   <span className="task-name">{getDisplayLabel(subtask)}</span>
                 </div>
                 <span className="task-status-text">waiting</span>
@@ -313,7 +354,7 @@ function RunningTaskItem({ label, state, onStop, onFocus, onOpenDefinition, onDi
             </div>
           );
         }
-        // Show running subtask recursively
+        // Show subtask (running, completed, or failed) recursively
         return (
           <RunningTaskItem
             key={subtask}

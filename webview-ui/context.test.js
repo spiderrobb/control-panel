@@ -119,8 +119,8 @@ describe('TaskStateProvider', () => {
     });
 
     test('handles taskEnded message', async () => {
-      jest.useFakeTimers();
-      renderWithProviders(<TestConsumer />);
+      let capturedCtx;
+      renderWithProviders(<TestConsumer onContext={ctx => { capturedCtx = ctx; }} />);
 
       // Start task
       sendMessage('taskStarted', { taskLabel: 'test', startTime: Date.now() });
@@ -129,17 +129,14 @@ describe('TaskStateProvider', () => {
         expect(screen.getByTestId('running-count')).toHaveTextContent('1');
       });
 
-      // End task
+      // End task — should mark as completed, not delete
       sendMessage('taskEnded', { taskLabel: 'test' });
 
-      // The context removes after a 1s delay
-      act(() => { jest.advanceTimersByTime(1500); });
-
       await waitFor(() => {
-        expect(screen.getByTestId('running-count')).toHaveTextContent('0');
+        expect(capturedCtx.runningTasks['test']?.running).toBe(false);
+        expect(capturedCtx.runningTasks['test']?.completed).toBe(true);
+        expect(capturedCtx.runningTasks['test']?.state).toBe('stopped');
       });
-
-      jest.useRealTimers();
     });
 
     test('handles taskFailed message for existing task', async () => {
@@ -267,11 +264,11 @@ describe('TaskStateProvider', () => {
         expect(capturedCtx.runningTasks['deploy']?.subtasks).toContain('build');
       });
 
-      // End subtask
+      // End subtask — child stays in subtasks array (persists until dismissed)
       sendMessage('subtaskEnded', { parentLabel: 'deploy', childLabel: 'build' });
 
       await waitFor(() => {
-        expect(capturedCtx.runningTasks['deploy']?.subtasks).not.toContain('build');
+        expect(capturedCtx.runningTasks['deploy']?.subtasks).toContain('build');
       });
     });
 
@@ -526,7 +523,6 @@ describe('TaskStateProvider', () => {
 
   describe('State Lifecycle', () => {
     test('task lifecycle: idle → started → running → ended', async () => {
-      jest.useFakeTimers();
       let capturedCtx;
       renderWithProviders(<TestConsumer onContext={ctx => { capturedCtx = ctx; }} />);
 
@@ -541,12 +537,13 @@ describe('TaskStateProvider', () => {
       sendMessage('taskStateChanged', { taskLabel: 'test', state: 'running' });
       await waitFor(() => expect(capturedCtx.runningTasks['test']?.state).toBe('running'));
 
-      // Ended
+      // Ended — persists as completed until dismissed
       sendMessage('taskEnded', { taskLabel: 'test' });
-      act(() => { jest.advanceTimersByTime(1500); });
-      await waitFor(() => expect(capturedCtx.runningTasks['test']).toBeUndefined());
-
-      jest.useRealTimers();
+      await waitFor(() => {
+        expect(capturedCtx.runningTasks['test']?.running).toBe(false);
+        expect(capturedCtx.runningTasks['test']?.completed).toBe(true);
+        expect(capturedCtx.runningTasks['test']?.state).toBe('stopped');
+      });
     });
 
     test('task failure: idle → started → failed → dismissed', async () => {
@@ -577,24 +574,114 @@ describe('TaskStateProvider', () => {
       // Start parent
       sendMessage('taskStarted', { taskLabel: 'deploy', startTime: Date.now(), subtasks: [] });
 
-      // Add subtask
+      // Add subtask — also creates a child entry with parentTask set
       sendMessage('subtaskStarted', { parentLabel: 'deploy', childLabel: 'build' });
-      await waitFor(() => expect(capturedCtx.runningTasks['deploy']?.subtasks).toContain('build'));
+      await waitFor(() => {
+        expect(capturedCtx.runningTasks['deploy']?.subtasks).toContain('build');
+        expect(capturedCtx.runningTasks['build']?.parentTask).toBe('deploy');
+      });
 
       // Add another subtask
       sendMessage('subtaskStarted', { parentLabel: 'deploy', childLabel: 'test' });
-      await waitFor(() => expect(capturedCtx.runningTasks['deploy']?.subtasks).toEqual(['build', 'test']));
-
-      // End first subtask
-      sendMessage('subtaskEnded', { parentLabel: 'deploy', childLabel: 'build' });
       await waitFor(() => {
-        expect(capturedCtx.runningTasks['deploy']?.subtasks).toEqual(['test']);
+        expect(capturedCtx.runningTasks['deploy']?.subtasks).toEqual(['build', 'test']);
+        expect(capturedCtx.runningTasks['test']?.parentTask).toBe('deploy');
       });
 
-      // End second subtask
+      // End first subtask — stays in parent's subtasks array
+      sendMessage('subtaskEnded', { parentLabel: 'deploy', childLabel: 'build' });
+      await waitFor(() => {
+        expect(capturedCtx.runningTasks['deploy']?.subtasks).toEqual(['build', 'test']);
+      });
+
+      // End second subtask — also stays
       sendMessage('subtaskEnded', { parentLabel: 'deploy', childLabel: 'test' });
       await waitFor(() => {
-        expect(capturedCtx.runningTasks['deploy']?.subtasks).toEqual([]);
+        expect(capturedCtx.runningTasks['deploy']?.subtasks).toEqual(['build', 'test']);
+      });
+    });
+
+    test('multi-level nesting: only top-level parent appears as root (demo:pipeline)', async () => {
+      let capturedCtx;
+      renderWithProviders(<TestConsumer onContext={ctx => { capturedCtx = ctx; }} />);
+
+      // Simulate the message sequence produced by ensureParentRunning walking
+      // up the hierarchy when the first leaf task starts.
+      //
+      // Hierarchy:
+      //   demo:pipeline
+      //     ├── demo:stage-1
+      //     │   ├── demo:s1-lint    (leaf, runs first)
+      //     │   ├── demo:s1-types
+      //     │   └── demo:s1-format
+      //     ├── demo:stage-2
+      //     └── demo:stage-3
+
+      const now = Date.now();
+
+      // 1. Root is set up first (ensureParentRunning recurses to the top)
+      sendMessage('taskStarted', {
+        taskLabel: 'demo:pipeline',
+        startTime: now,
+        subtasks: ['demo:stage-1', 'demo:stage-2', 'demo:stage-3'],
+        state: 'running',
+        parentTask: null
+      });
+
+      // 2. subtaskStarted links stage-1 under pipeline
+      sendMessage('subtaskStarted', { parentLabel: 'demo:pipeline', childLabel: 'demo:stage-1', parentStartTime: now });
+
+      // 3. stage-1 starts with parentTask pointing to pipeline
+      sendMessage('taskStarted', {
+        taskLabel: 'demo:stage-1',
+        startTime: now,
+        subtasks: ['demo:s1-lint', 'demo:s1-types', 'demo:s1-format'],
+        state: 'running',
+        parentTask: 'demo:pipeline'
+      });
+
+      // 4. subtaskStarted links s1-lint under stage-1
+      sendMessage('subtaskStarted', { parentLabel: 'demo:stage-1', childLabel: 'demo:s1-lint', parentStartTime: now });
+
+      // 5. leaf task starts with parentTask pointing to stage-1
+      sendMessage('taskStarted', {
+        taskLabel: 'demo:s1-lint',
+        startTime: now,
+        subtasks: [],
+        state: 'running',
+        parentTask: 'demo:stage-1'
+      });
+
+      await waitFor(() => {
+        const tasks = capturedCtx.runningTasks;
+
+        // All three started entries exist
+        expect(tasks['demo:pipeline']).toBeDefined();
+        expect(tasks['demo:stage-1']).toBeDefined();
+        expect(tasks['demo:s1-lint']).toBeDefined();
+
+        // Only demo:pipeline is a root (parentTask is null)
+        expect(tasks['demo:pipeline'].parentTask).toBeNull();
+        expect(tasks['demo:stage-1'].parentTask).toBe('demo:pipeline');
+        expect(tasks['demo:s1-lint'].parentTask).toBe('demo:stage-1');
+
+        // Subtask arrays are correct
+        expect(tasks['demo:pipeline'].subtasks).toContain('demo:stage-1');
+        expect(tasks['demo:stage-1'].subtasks).toContain('demo:s1-lint');
+
+        // Count root-level tasks (same filter RunningTasksPanel uses)
+        const rootTasks = Object.entries(tasks)
+          .filter(([_, state]) => state.running || state.completed || state.failed)
+          .filter(([_, state]) => !state.parentTask);
+        expect(rootTasks).toHaveLength(1);
+        expect(rootTasks[0][0]).toBe('demo:pipeline');
+
+        // Verify EVERY non-root entry has parentTask set — no child gets its own row
+        const allEntries = Object.entries(tasks);
+        const childEntries = allEntries.filter(([label]) => label !== 'demo:pipeline');
+        childEntries.forEach(([label, state]) => {
+          expect(state.parentTask).toBeTruthy();
+        });
       });
     });
   });

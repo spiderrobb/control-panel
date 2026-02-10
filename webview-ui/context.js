@@ -1,5 +1,5 @@
 /* eslint-disable react-hooks/exhaustive-deps */
-import React, { createContext, useContext, useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import React, { createContext, useContext, useState, useEffect, useMemo, useCallback } from 'react';
 
 // VS Code API wrapper ensures it is only acquired once
 const vscode = (function() {
@@ -31,9 +31,6 @@ export function TaskStateProvider({ children }) {
   const [executionHistory, setExecutionHistory] = useState([]);
   const [runningTasksCollapsed, setRunningTasksCollapsed] = useState(false);
   const [starredTasksCollapsed, setStarredTasksCollapsed] = useState(false);
-
-  // Track taskEnded cleanup timers for proper cleanup on unmount
-  const taskEndTimers = useRef([]);
 
   // Compute average durations from execution history
   const taskHistoryMap = useMemo(() => {
@@ -85,6 +82,17 @@ export function TaskStateProvider({ children }) {
   const handleDismissTask = useCallback((label) => {
     setRunningTasks(prev => {
       const updated = { ...prev };
+      // Also remove all child tasks that belong to this parent
+      const subtasks = updated[label]?.subtasks || [];
+      subtasks.forEach(childLabel => {
+        delete updated[childLabel];
+      });
+      // Remove any other entry whose parentTask points to this label
+      Object.keys(updated).forEach(key => {
+        if (updated[key]?.parentTask === label) {
+          delete updated[key];
+        }
+      });
       delete updated[label];
       return updated;
     });
@@ -114,14 +122,6 @@ export function TaskStateProvider({ children }) {
     });
   }, []);
 
-  // Cleanup task-end timers on unmount
-  useEffect(() => {
-    const timers = taskEndTimers.current;
-    return () => {
-      timers.forEach(id => clearTimeout(id));
-    };
-  }, []);
-
   useEffect(() => {
     const messageHandler = (event) => {
       const message = event.data;
@@ -132,60 +132,116 @@ export function TaskStateProvider({ children }) {
           break;
         case 'taskStarted':
           setRunningTasks(prev => {
-            // Check if this task is already a subtask of another running task
-            const parentEntry = Object.entries(prev).find(([_parentLabel, state]) => 
-              state.subtasks?.includes(message.taskLabel)
-            );
+            // Determine parentTask: prefer the value from the message (set by
+            // the extension), then check if subtaskStarted already set it on
+            // an existing entry, then fall back to scanning other entries.
+            let parentTask = message.parentTask || null;
+            if (!parentTask && prev[message.taskLabel]?.parentTask) {
+              parentTask = prev[message.taskLabel].parentTask;
+            }
+            if (!parentTask) {
+              const parentEntry = Object.entries(prev).find(([_parentLabel, state]) => 
+                state.subtasks?.includes(message.taskLabel)
+              );
+              if (parentEntry) parentTask = parentEntry[0];
+            }
             
             return {
               ...prev,
               [message.taskLabel]: {
+                // Only preserve subtasks and parentTask from previous entry;
+                // all other fields are reset to prevent stale completed/failed
+                // state from bleeding through via spread.
+                subtasks: message.subtasks || prev[message.taskLabel]?.subtasks || [],
+                parentTask,
                 running: true,
                 startTime: message.startTime || Date.now(),
                 execution: message.execution,
                 avgDuration: message.avgDuration,
                 isFirstRun: message.isFirstRun,
-                subtasks: message.subtasks || [],
-                parentTask: parentEntry ? parentEntry[0] : null,
-                state: message.state || 'running'
+                state: message.state || 'running',
+                completed: false,
+                failed: false,
+                exitCode: undefined,
+                failureReason: null,
+                failedDependency: undefined,
+                duration: undefined
               }
             };
           });
           break;
         case 'taskEnded': {
+          // taskEnded is sent for manually stopped tasks.
+          // Mark as completed so it stays visible until the user dismisses it.
           setRunningTasks(prev => {
             if (!prev[message.taskLabel]) return prev;
             return {
               ...prev,
-              [message.taskLabel]: { ...prev[message.taskLabel], running: false }
+              [message.taskLabel]: {
+                ...prev[message.taskLabel],
+                running: false,
+                completed: true,
+                state: 'stopped'
+              }
             };
           });
-          // Remove after a short delay for smooth transition (outside state updater)
-          const endTimerId = setTimeout(() => {
-            setRunningTasks(current => {
-              // Ensure we don't remove if it started again
-              if (!current[message.taskLabel] || current[message.taskLabel].running) return current;
-              const copy = { ...current };
-              delete copy[message.taskLabel];
-              return copy;
-            });
-          }, 1000);
-          taskEndTimers.current.push(endTimerId);
           break;
         }
+        case 'taskCompleted':
+          // Unified handler for all naturally completed tasks (success or failure).
+          // The task stays visible until the user explicitly dismisses it.
+          setRunningTasks(prev => {
+            const updated = { ...prev };
+            const existing = updated[message.taskLabel];
+            const isFailed = message.failed || false;
+            if (existing) {
+              updated[message.taskLabel] = {
+                ...existing,
+                running: false,
+                completed: true,
+                failed: isFailed,
+                exitCode: message.exitCode,
+                failureReason: message.reason,
+                failedDependency: message.failedDependency,
+                duration: message.duration,
+                state: isFailed ? 'failed' : 'completed',
+                // Preserve parentTask from existing entry, or accept from message
+                parentTask: existing.parentTask || message.parentTask || null
+              };
+            } else {
+              // Task might not be in state yet (e.g. restored from persistence)
+              updated[message.taskLabel] = {
+                running: false,
+                completed: true,
+                failed: isFailed,
+                exitCode: message.exitCode,
+                failureReason: message.reason,
+                failedDependency: message.failedDependency,
+                startTime: Date.now() - (message.duration || 0),
+                duration: message.duration,
+                subtasks: message.subtasks || [],
+                state: isFailed ? 'failed' : 'completed',
+                parentTask: message.parentTask || null
+              };
+            }
+            return updated;
+          });
+          break;
         case 'taskFailed':
+          // Legacy handler — kept for backwards compatibility
           setRunningTasks(prev => {
             const updated = { ...prev };
             if (updated[message.taskLabel]) {
               updated[message.taskLabel].running = false;
+              updated[message.taskLabel].completed = true;
               updated[message.taskLabel].failed = true;
               updated[message.taskLabel].exitCode = message.exitCode;
               updated[message.taskLabel].failureReason = message.reason;
               updated[message.taskLabel].failedDependency = message.failedDependency;
             } else {
-              // Task might not be in state yet, add it as failed
               updated[message.taskLabel] = {
                 running: false,
+                completed: true,
                 failed: true,
                 exitCode: message.exitCode,
                 failureReason: message.reason,
@@ -214,7 +270,7 @@ export function TaskStateProvider({ children }) {
           setRunningTasks(prev => {
             const updated = { ...prev };
             if (!updated[message.parentLabel]) {
-               // Should not happen usually if parent is running
+               // Parent entry may not exist yet — create a placeholder
                updated[message.parentLabel] = {
                 running: true,
                 startTime: message.parentStartTime || Date.now(),
@@ -232,6 +288,23 @@ export function TaskStateProvider({ children }) {
                 subtasks
               };
             }
+
+            // Eagerly set parentTask on the child entry so it doesn't
+            // depend on message ordering in the taskStarted handler.
+            if (updated[message.childLabel]) {
+              updated[message.childLabel] = {
+                ...updated[message.childLabel],
+                parentTask: message.parentLabel
+              };
+            } else {
+              // Child hasn't started yet — create a minimal placeholder
+              updated[message.childLabel] = {
+                running: false,
+                parentTask: message.parentLabel,
+                state: 'waiting'
+              };
+            }
+
             return updated;
           });
           break;
@@ -240,8 +313,14 @@ export function TaskStateProvider({ children }) {
             if (!prev[message.parentLabel]) return prev;
             
             const updated = { ...prev };
-            const subtasks = (updated[message.parentLabel].subtasks || [])
-              .filter(label => label !== message.childLabel);
+
+            // Keep the child in the parent's subtasks array so it remains
+            // visible under the parent until the user dismisses the group.
+            // Ensure the child is listed (defensive — it should already be).
+            const subtasks = [...(updated[message.parentLabel].subtasks || [])];
+            if (!subtasks.includes(message.childLabel)) {
+              subtasks.push(message.childLabel);
+            }
             updated[message.parentLabel] = {
               ...updated[message.parentLabel],
               subtasks

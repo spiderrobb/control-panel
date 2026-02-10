@@ -122,13 +122,13 @@
     {
       "label": "fail:exit1",
       "type": "shell",
-      "command": "echo 'Task running...' && sleep 1 && echo 'Task failed!' && exit 1",
+      "command": "echo 'Task running...' && sleep 3 && echo 'Task failed!' && exit 1",
       "problemMatcher": []
     },
     {
       "label": "fail:exit2",
       "type": "shell",
-      "command": "echo 'Starting task...' && sleep 1 && echo 'Misuse of shell command!' && exit 2",
+      "command": "echo 'Starting task...' && sleep 3 && echo 'Misuse of shell command!' && exit 2",
       "problemMatcher": []
     },
     {

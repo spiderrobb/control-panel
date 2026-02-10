@@ -168,6 +168,7 @@ function TaskLink({ label, taskId, displayLabel, disabled = false }) {
     const state = resolveRunningState(taskIdOrLabel);
     if (state?.failed) return 'error';
     if (state?.running) return 'running';
+    if (state?.completed) return 'success';
     return 'idle';
   }, [resolveRunningState]);
 

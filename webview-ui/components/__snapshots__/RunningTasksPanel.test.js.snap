@@ -16,6 +16,30 @@ exports[`RunningTasksPanel Rendering snapshot: panel with running tasks 1`] = `
       <div
         style="display: flex; gap: 4px; margin-left: auto;"
       >
+        <span
+          aria-label="Clear all completed and failed tasks"
+          class=""
+          data-mui-internal-clone-element="true"
+        >
+          <button
+            class="MuiButtonBase-root Mui-disabled MuiIconButton-root Mui-disabled MuiIconButton-sizeSmall css-1wjptj6-MuiButtonBase-root-MuiIconButton-root"
+            disabled=""
+            tabindex="-1"
+            type="button"
+          >
+            <svg
+              aria-hidden="true"
+              class="MuiSvgIcon-root MuiSvgIcon-fontSizeMedium css-19pfla-MuiSvgIcon-root"
+              data-testid="ClearAllIcon"
+              focusable="false"
+              viewBox="0 0 24 24"
+            >
+              <path
+                d="M5 13h14v-2H5zm-2 4h14v-2H3zM7 7v2h14V7z"
+              />
+            </svg>
+          </button>
+        </span>
         <button
           aria-label="Collapse"
           class="MuiButtonBase-root MuiIconButton-root MuiIconButton-sizeSmall css-1wjptj6-MuiButtonBase-root-MuiIconButton-root"

@@ -271,12 +271,14 @@ export function createMockTask(label, options = {}) {
  */
 export function createRunningTaskState(taskLabel, options = {}) {
   return {
-    running: options.running !== undefined ? options.running : !options.failed,
+    running: options.running !== undefined ? options.running : !options.failed && !options.completed,
+    completed: options.completed || options.failed || false,
     failed: options.failed || false,
     startTime: options.startTime || Date.now(),
     exitCode: options.exitCode,
     failureReason: options.failureReason,
     failedDependency: options.failedDependency,
+    duration: options.duration || null,
     avgDuration: options.avgDuration || null,
     isFirstRun: options.isFirstRun || false,
     subtasks: options.subtasks || [],
