@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import IconButton from '@mui/material/IconButton';
 import Tooltip from '@mui/material/Tooltip';
 import Popover from '@mui/material/Popover';
@@ -74,6 +74,61 @@ function TaskLink({ label, taskId, displayLabel, disabled = false }) {
   // dependsOn is now a recursive tree of { label, id, source, definition, dependsOn, dependsOrder }
   const dependencyTree = currentTask?.dependsOn || [];
   const hasDependencies = dependencyTree.length > 0;
+
+  // --- Conflict detection: disable TaskLinks involved in running trees ---
+  // Collects all task IDs and labels from a dependency tree into a Set
+  const collectTreeKeys = useCallback((deps, out = new Set()) => {
+    for (const dep of deps) {
+      if (dep.id) out.add(dep.id);
+      if (dep.label) out.add(dep.label);
+      if (dep.dependsOn?.length) collectTreeKeys(dep.dependsOn, out);
+    }
+    return out;
+  }, []);
+
+  const treeConflictDisabled = useMemo(() => {
+    const myKey = resolvedId || label;
+    if (!myKey) return false;
+
+    // 1) Is this task a descendant of any OTHER running task's tree?
+    //    Walk every task with dependsOn and check if it's running and
+    //    this task appears in its tree.
+    for (const task of tasks) {
+      if (!task.dependsOn?.length) continue;
+      const taskKey = task.id || task.label;
+      // Skip self — we don't need to disable if WE are the root
+      if (taskKey === myKey) continue;
+
+      // Check if that root task is running
+      const rootState = runningTasks[taskKey] || runningTasks[task.label];
+      if (!rootState?.running) continue;
+
+      // Collect all descendant keys of that running tree
+      const descendantKeys = collectTreeKeys(task.dependsOn);
+      if (descendantKeys.has(myKey) || descendantKeys.has(resolvedId) || descendantKeys.has(label)) {
+        return true;
+      }
+    }
+
+    // 2) Does this task have a descendant that is currently running
+    //    independently (i.e. running outside of our own tree)?
+    if (hasDependencies) {
+      const myDescendants = collectTreeKeys(dependencyTree);
+      for (const key of myDescendants) {
+        const state = runningTasks[key];
+        if (state?.running) return true;
+        // Also check by label extracted from id (source|label|path)
+        if (!state && key.includes('|')) {
+          const labelPart = key.split('|')[1];
+          if (runningTasks[labelPart]?.running) return true;
+        }
+      }
+    }
+
+    return false;
+  }, [tasks, runningTasks, resolvedId, label, dependencyTree, hasDependencies, collectTreeKeys]);
+
+  const effectiveDisabled = disabled || treeConflictDisabled;
 
   // Check if any task in the tree is running (for segment tick timer)
   const hasAnyRunningInTree = useCallback((deps) => {
@@ -340,10 +395,14 @@ function TaskLink({ label, taskId, displayLabel, disabled = false }) {
     );
   };
 
-  const tooltipTitle = taskNotFound ? 'Task not found' : '';
+  const tooltipTitle = taskNotFound 
+    ? 'Task not found' 
+    : treeConflictDisabled 
+    ? 'Task is part of a running task tree' 
+    : '';
   const containerSx = taskNotFound 
     ? { opacity: 0.45, '& .task-expanded, & .task-pill': { borderLeftColor: '#555' } }
-    : disabled 
+    : effectiveDisabled 
     ? { 
         backgroundColor: 'var(--vscode-input-background)',
         color: 'var(--vscode-descriptionForeground)',
@@ -362,7 +421,7 @@ function TaskLink({ label, taskId, displayLabel, disabled = false }) {
             className={`task-pill ${hasDependencies ? '' : getBackgroundClass()}`} 
             style={getProgressStyle()}
           >
-          <Tooltip title={disabled || taskNotFound ? '' : (starredTasks?.includes(resolvedId || label) ? 'Remove from starred tasks' : 'Add to starred tasks')}>
+          <Tooltip title={effectiveDisabled || taskNotFound ? '' : (starredTasks?.includes(resolvedId || label) ? 'Remove from starred tasks' : 'Add to starred tasks')}>
             <span>
               <IconButton
                 size="small"
@@ -370,7 +429,7 @@ function TaskLink({ label, taskId, displayLabel, disabled = false }) {
                   e.stopPropagation();
                   onToggleStar?.(resolvedId || label);
                 }}
-                disabled={disabled || taskNotFound}
+                disabled={effectiveDisabled || taskNotFound}
                 sx={{ p: 0.5, color: 'inherit' }}
               >
                 {starredTasks?.includes(resolvedId || label) ? <StarIcon sx={{ fontSize: 16 }} /> : <StarBorderIcon sx={{ fontSize: 16 }} />}
@@ -388,17 +447,17 @@ function TaskLink({ label, taskId, displayLabel, disabled = false }) {
                 onSegmentHover={handleSegmentHover}
                 onSegmentLeave={handleSegmentLeave}
                 onOpenDefinition={onOpenDefinition}
-                disabled={disabled || taskNotFound}
+                disabled={effectiveDisabled || taskNotFound}
                 isRoot
               />
             </div>
           ) : (
             <span
               className="task-label"
-              onDoubleClick={disabled || taskNotFound ? undefined : () => onOpenDefinition(resolvedId || label)}
+              onDoubleClick={effectiveDisabled || taskNotFound ? undefined : () => onOpenDefinition(resolvedId || label)}
               onMouseEnter={(e) => handleSegmentHover(e, resolvedId || label)}
               onMouseLeave={handleSegmentLeave}
-              title={disabled || taskNotFound ? undefined : "Double-click to open task definition"}
+              title={effectiveDisabled || taskNotFound ? undefined : "Double-click to open task definition"}
             >
               {isNpmTask && (
                 <Chip
@@ -421,7 +480,7 @@ function TaskLink({ label, taskId, displayLabel, disabled = false }) {
 
           {isFailed ? (
             <>
-              <Tooltip title={disabled || taskNotFound ? '' : "Retry this task"}>
+              <Tooltip title={effectiveDisabled || taskNotFound ? '' : "Retry this task"}>
                 <span>
                   <IconButton
                     size="small"
@@ -429,7 +488,7 @@ function TaskLink({ label, taskId, displayLabel, disabled = false }) {
                       handleSegmentLeave();
                       onRun(resolvedId || label);
                     }}
-                    disabled={disabled || taskNotFound}
+                    disabled={effectiveDisabled || taskNotFound}
                     sx={{ p: 0.5, ml: 0.5 }}
                   >
                     <PlayArrowIcon sx={{ fontSize: 16 }} />
@@ -440,12 +499,12 @@ function TaskLink({ label, taskId, displayLabel, disabled = false }) {
           ) : (
             <>
               <span className="runtime" title={`Running for ${formatRuntime(runtime)}`}>{formatRuntime(runtime)}</span>
-              <Tooltip title={disabled || taskNotFound ? '' : (canFocus ? "Show terminal output for this task" : "Terminal not available")}>
+              <Tooltip title={effectiveDisabled || taskNotFound ? '' : (canFocus ? "Show terminal output for this task" : "Terminal not available")}>
                 <span>
                   <IconButton
                     size="small"
                     onClick={() => onFocus(resolvedId || label)}
-                    disabled={!canFocus || disabled || taskNotFound}
+                    disabled={!canFocus || effectiveDisabled || taskNotFound}
                     sx={{ p: 0.5, ml: 0.5 }}
                   >
                     <BoltIcon sx={{ fontSize: 16 }} />
@@ -493,7 +552,7 @@ function TaskLink({ label, taskId, displayLabel, disabled = false }) {
     <>
       <span className="task-link">
         <span className="task-expanded">
-        <Tooltip title={disabled || taskNotFound ? '' : (starredTasks?.includes(resolvedId || label) ? 'Remove from starred tasks' : 'Add to starred tasks')}>
+        <Tooltip title={effectiveDisabled || taskNotFound ? '' : (starredTasks?.includes(resolvedId || label) ? 'Remove from starred tasks' : 'Add to starred tasks')}>
           <span>
             <IconButton
               size="small"
@@ -501,7 +560,7 @@ function TaskLink({ label, taskId, displayLabel, disabled = false }) {
                 e.stopPropagation();
                 onToggleStar?.(resolvedId || label);
               }}
-              disabled={disabled || taskNotFound}
+              disabled={effectiveDisabled || taskNotFound}
               sx={{ p: 0.5, color: 'inherit' }}
             >
               {starredTasks?.includes(resolvedId || label) ? <StarIcon sx={{ fontSize: 16 }} /> : <StarBorderIcon sx={{ fontSize: 16 }} />}
@@ -519,17 +578,17 @@ function TaskLink({ label, taskId, displayLabel, disabled = false }) {
               onSegmentHover={handleSegmentHover}
               onSegmentLeave={handleSegmentLeave}
               onOpenDefinition={onOpenDefinition}
-              disabled={disabled || taskNotFound}
+              disabled={effectiveDisabled || taskNotFound}
               isRoot
             />
           </div>
         ) : (
           <span
             className="task-label"
-            onDoubleClick={disabled || taskNotFound ? undefined : () => onOpenDefinition(resolvedId || label)}
+            onDoubleClick={effectiveDisabled || taskNotFound ? undefined : () => onOpenDefinition(resolvedId || label)}
             onMouseEnter={(e) => handleSegmentHover(e, resolvedId || label)}
             onMouseLeave={handleSegmentLeave}
-            title={disabled || taskNotFound ? undefined : "Double-click to open task definition"}
+            title={effectiveDisabled || taskNotFound ? undefined : "Double-click to open task definition"}
           >
             {isNpmTask && (
               <Chip
@@ -550,7 +609,7 @@ function TaskLink({ label, taskId, displayLabel, disabled = false }) {
           </span>
         )}
 
-        <Tooltip title={disabled || taskNotFound ? '' : "Run this task"}>
+        <Tooltip title={effectiveDisabled || taskNotFound ? '' : "Run this task"}>
           <span>
             <IconButton
               size="small"
@@ -558,7 +617,7 @@ function TaskLink({ label, taskId, displayLabel, disabled = false }) {
                 handleSegmentLeave();
                 onRun(resolvedId || label);
               }}
-              disabled={disabled || taskNotFound}
+              disabled={effectiveDisabled || taskNotFound}
               sx={{ p: 0.5, ml: 0.5 }}
             >
               <PlayArrowIcon sx={{ fontSize: 16 }} />
