@@ -3,11 +3,7 @@
   "displayName": "ControlPanel",
   "description": "MDX-powered task management and documentation panel",
   "version": "0.0.1",
-  "publisher": "your-publisher-name",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/placeholder/controlpanel"
-  },
+  "publisher": "RobbinHarris",
   "engines": {
     "vscode": "^1.85.0"
   },
