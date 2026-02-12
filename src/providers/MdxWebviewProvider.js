@@ -823,6 +823,24 @@ class MdxWebviewProvider {
             entries: this._logger.getBuffer()
           });
           break;
+        case 'openFile': {
+          const workspaceFolders = vscode.workspace.workspaceFolders;
+          if (workspaceFolders && message.path) {
+            const cpdoxPath = path.join(workspaceFolders[0].uri.fsPath, '.cpdox');
+            // Resolve relative to the directory of the current MDX file
+            const baseDir = message.currentFile
+              ? path.dirname(path.join(cpdoxPath, message.currentFile))
+              : cpdoxPath;
+            const resolvedPath = path.resolve(baseDir, message.path);
+            if (fs.existsSync(resolvedPath)) {
+              const fileUri = vscode.Uri.file(resolvedPath);
+              await vscode.commands.executeCommand('vscode.open', fileUri);
+            } else {
+              vscode.window.showErrorMessage(`File not found: ${message.path}`);
+            }
+          }
+          break;
+        }
         case 'openCurrentFile': {
           const workspaceFolders = vscode.workspace.workspaceFolders;
           if (workspaceFolders && message.file) {
@@ -841,6 +859,35 @@ class MdxWebviewProvider {
             type: 'executionHistory',
             history
           });
+          break;
+        }
+        case 'listMdxFiles': {
+          try {
+            const workspaceFolders = vscode.workspace.workspaceFolders;
+            if (!workspaceFolders) break;
+            const cpdoxPath = path.join(workspaceFolders[0].uri.fsPath, '.cpdox');
+            if (!fs.existsSync(cpdoxPath)) {
+              this._view?.webview.postMessage({ type: 'mdxFileList', files: [] });
+              break;
+            }
+            const entries = fs.readdirSync(cpdoxPath).filter(f => f.endsWith('.mdx'));
+            const files = entries.map(fileName => {
+              try {
+                const filePath = path.join(cpdoxPath, fileName);
+                const content = fs.readFileSync(filePath, 'utf8');
+                // Extract first # heading as title
+                const headingMatch = content.match(/^#\s+(.+)$/m);
+                const title = headingMatch ? headingMatch[1].trim() : fileName.replace(/\.mdx$/, '');
+                return { title, file: fileName };
+              } catch {
+                return { title: fileName.replace(/\.mdx$/, ''), file: fileName };
+              }
+            });
+            this._view?.webview.postMessage({ type: 'mdxFileList', files });
+          } catch (error) {
+            this._logger.error('Failed to list MDX files:', error);
+            this._view?.webview.postMessage({ type: 'mdxFileList', files: [] });
+          }
           break;
         }
         case 'copyTasksJson': {

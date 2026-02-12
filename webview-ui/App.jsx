@@ -8,6 +8,8 @@ import HistoryIcon from '@mui/icons-material/History';
 import WorkHistoryIcon from '@mui/icons-material/WorkHistory';
 import CloseIcon from '@mui/icons-material/Close';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
+import SearchIcon from '@mui/icons-material/Search';
+import TocIcon from '@mui/icons-material/Toc';
 import Button from '@mui/material/Button';
 import IconButton from '@mui/material/IconButton';
 import ListSubheader from '@mui/material/ListSubheader';
@@ -124,7 +126,61 @@ function ControlPanel() {
   const [historyMenuAnchor, setHistoryMenuAnchor] = useState(null);
   const [showHistory, setShowHistory] = useState(false);
   const [lastViewedDocument, setLastViewedDocument] = useState('');
-  
+  const [showSearch, setShowSearch] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [allMdxFiles, setAllMdxFiles] = useState([]);
+  const [filteredResults, setFilteredResults] = useState([]);
+  const [selectedResultIndex, setSelectedResultIndex] = useState(0);
+  const searchInputRef = useRef(null);
+  const [outlineMenuAnchor, setOutlineMenuAnchor] = useState(null);
+
+  // Extract document outline (headings) from raw MDX content
+  const documentOutline = useMemo(() => {
+    if (!mdxContent) return [];
+    const headings = [];
+    const lines = mdxContent.split('\n');
+    let inCodeBlock = false;
+    for (const line of lines) {
+      if (line.trim().startsWith('```')) {
+        inCodeBlock = !inCodeBlock;
+        continue;
+      }
+      if (inCodeBlock) continue;
+      const match = line.match(/^(#{1,6})\s+(.+)$/);
+      if (match) {
+        const level = match[1].length;
+        const rawText = match[2].trim();
+        // Strip inline markdown so the ID matches what generateHeadingId
+        // produces from the rendered React children (which have no syntax)
+        const plainText = rawText
+          .replace(/\*\*(.+?)\*\*/g, '$1')   // bold
+          .replace(/\*(.+?)\*/g, '$1')        // italic
+          .replace(/__(.+?)__/g, '$1')        // bold alt
+          .replace(/_(.+?)_/g, '$1')          // italic alt
+          .replace(/~~(.+?)~~/g, '$1')        // strikethrough
+          .replace(/`(.+?)`/g, '$1')          // inline code
+          .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1'); // links
+        const id = generateHeadingId(plainText);
+        headings.push({ level, text: plainText, id });
+      }
+    }
+    return headings;
+  }, [mdxContent]);
+
+  const handleOutlineJump = useCallback((id) => {
+    setOutlineMenuAnchor(null);
+    const targetElement = document.getElementById(id);
+    if (targetElement && contentRef.current) {
+      const containerRect = contentRef.current.getBoundingClientRect();
+      const targetRect = targetElement.getBoundingClientRect();
+      const stickyOffset = 52;
+      contentRef.current.scrollTo({
+        top: contentRef.current.scrollTop + (targetRect.top - containerRect.top) - stickyOffset,
+        behavior: 'smooth'
+      });
+    }
+  }, []);
+
   // Local state for compilation
   const [MdxModule, setMdxModule] = useState(null);
   const [mdxError, setMdxError] = useState(null);
@@ -148,6 +204,9 @@ function ControlPanel() {
           break;
         case 'logBuffer':
           setLogBuffer(message.entries || []);
+          break;
+        case 'mdxFileList':
+          setAllMdxFiles(message.files || []);
           break;
         case 'error':
           console.warn(message.message);
@@ -202,6 +261,78 @@ function ControlPanel() {
     vscode.postMessage({ type: 'copyTasksJson' });
   };
 
+  // --- Search feature ---
+  const handleOpenSearch = useCallback(() => {
+    setShowSearch(true);
+    setSearchQuery('');
+    setSelectedResultIndex(0);
+    vscode.postMessage({ type: 'listMdxFiles' });
+  }, []);
+
+  const handleCloseSearch = useCallback(() => {
+    setShowSearch(false);
+    setSearchQuery('');
+    setFilteredResults([]);
+    setAllMdxFiles([]);
+    setSelectedResultIndex(0);
+  }, []);
+
+  const handleSearchSelect = useCallback((file) => {
+    handleCloseSearch();
+    handleNavigate(file);
+  }, [handleCloseSearch, handleNavigate]);
+
+  // Debounced filtering of search results (250ms)
+  useEffect(() => {
+    if (!showSearch) return;
+    const timer = setTimeout(() => {
+      if (!searchQuery.trim()) {
+        setFilteredResults(allMdxFiles);
+      } else {
+        const query = searchQuery.toLowerCase();
+        setFilteredResults(
+          allMdxFiles.filter(item =>
+            item.title.toLowerCase().includes(query) ||
+            item.file.toLowerCase().includes(query)
+          )
+        );
+      }
+      setSelectedResultIndex(0);
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [searchQuery, allMdxFiles, showSearch]);
+
+  // Auto-focus search input when search opens
+  useEffect(() => {
+    if (showSearch && searchInputRef.current) {
+      requestAnimationFrame(() => searchInputRef.current?.focus());
+    }
+  }, [showSearch]);
+
+  // Also set filtered results when allMdxFiles arrives
+  useEffect(() => {
+    if (showSearch && allMdxFiles.length > 0 && !searchQuery.trim()) {
+      setFilteredResults(allMdxFiles);
+    }
+  }, [allMdxFiles, showSearch, searchQuery]);
+
+  const handleSearchKeyDown = useCallback((e) => {
+    if (e.key === 'Escape') {
+      handleCloseSearch();
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setSelectedResultIndex(prev => Math.min(prev + 1, filteredResults.length - 1));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setSelectedResultIndex(prev => Math.max(prev - 1, 0));
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (filteredResults.length > 0 && selectedResultIndex < filteredResults.length) {
+        handleSearchSelect(filteredResults[selectedResultIndex].file);
+      }
+    }
+  }, [handleCloseSearch, handleSearchSelect, filteredResults, selectedResultIndex]);
+
   // Create MDX components object with all available components
   const mdxComponents = useMemo(() => ({
     // Custom task components
@@ -235,6 +366,19 @@ function ControlPanel() {
           />
         );
       }
+      // Handle relative file links (open in VS Code editor)
+      if (props.href && !props.href.startsWith('#') && !props.href.startsWith('http://') && !props.href.startsWith('https://')) {
+        return (
+          <a
+            {...props}
+            href="#"
+            onClick={(e) => {
+              e.preventDefault();
+              vscode.postMessage({ type: 'openFile', path: props.href, currentFile });
+            }}
+          />
+        );
+      }
       // Handle anchor links (internal page navigation)
       if (props.href?.startsWith('#')) {
         return (
@@ -245,12 +389,12 @@ function ControlPanel() {
               const targetId = props.href.slice(1);
               const targetElement = document.getElementById(targetId);
               if (targetElement && contentRef.current) {
-                const contentTop = contentRef.current.offsetTop;
-                const elementTop = targetElement.offsetTop;
+                const containerRect = contentRef.current.getBoundingClientRect();
+                const targetRect = targetElement.getBoundingClientRect();
                 // Account for the single sticky heading
                 const stickyOffset = 52;
                 contentRef.current.scrollTo({
-                  top: elementTop - contentTop - stickyOffset,
+                  top: contentRef.current.scrollTop + (targetRect.top - containerRect.top) - stickyOffset,
                   behavior: 'smooth'
                 });
                 // Remove focus from the link to prevent scroll-to-top bug
@@ -262,7 +406,7 @@ function ControlPanel() {
       }
       return <a {...props} target="_blank" rel="noopener noreferrer" />;
     }
-  }), [handleNavigate]);
+  }), [handleNavigate, currentFile]);
 
   // Compile MDX content when it changes
   useEffect(() => {
@@ -334,12 +478,12 @@ function ControlPanel() {
       const targetId = hash.slice(1);
       const targetElement = document.getElementById(targetId);
       if (targetElement) {
-        const contentTop = contentRef.current.offsetTop;
-        const elementTop = targetElement.offsetTop;
+        const containerRect = contentRef.current.getBoundingClientRect();
+        const targetRect = targetElement.getBoundingClientRect();
         const stickyOffset = 52;
         requestAnimationFrame(() => {
           contentRef.current.scrollTo({
-            top: elementTop - contentTop - stickyOffset,
+            top: contentRef.current.scrollTop + (targetRect.top - containerRect.top) - stickyOffset,
             behavior: 'smooth'
           });
         });
@@ -470,17 +614,48 @@ function ControlPanel() {
                   )}
                 </div>
                 <div className="breadcrumb-trail">
-                  <DescriptionIcon sx={{ fontSize: 16, mr: 0.5, verticalAlign: 'text-bottom' }} />
-                  <span className="breadcrumb-path">.cpdox</span>
-                  <span className="breadcrumb-separator"> / </span>
-                  <span 
-                    className="current-file" 
-                    onClick={() => vscode.postMessage({ type: 'openCurrentFile', file: currentFile })}
-                    style={{ cursor: 'pointer' }}
-                    title="Click to open in editor"
-                  >
-                    {currentFile}
-                  </span>
+                  {showSearch ? (
+                    <div className="search-input-wrapper">
+                      <SearchIcon sx={{ fontSize: 14, opacity: 0.5, flexShrink: 0 }} />
+                      <input
+                        ref={searchInputRef}
+                        className="search-input"
+                        type="text"
+                        placeholder="Search documents..."
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        onKeyDown={handleSearchKeyDown}
+                      />
+                      <Tooltip title="Close search">
+                        <IconButton size="small" onClick={handleCloseSearch} sx={{ p: 0.25, flexShrink: 0 }}>
+                          <CloseIcon sx={{ fontSize: 14 }} />
+                        </IconButton>
+                      </Tooltip>
+                    </div>
+                  ) : (
+                    <>
+                      <Tooltip title="Search documents">
+                        <IconButton
+                          size="small"
+                          onClick={handleOpenSearch}
+                          sx={{ p: 0.5, mr: 0.5 }}
+                        >
+                          <SearchIcon sx={{ fontSize: 18 }} />
+                        </IconButton>
+                      </Tooltip>
+                      <DescriptionIcon sx={{ fontSize: 16, mr: 0.5, verticalAlign: 'text-bottom' }} />
+                      <span className="breadcrumb-path">.cpdox</span>
+                      <span className="breadcrumb-separator"> / </span>
+                      <span 
+                        className="current-file" 
+                        onClick={() => vscode.postMessage({ type: 'openCurrentFile', file: currentFile })}
+                        style={{ cursor: 'pointer' }}
+                        title="Click to open in editor"
+                      >
+                        {currentFile}
+                      </span>
+                    </>
+                  )}
                 </div>
                 <div className="breadcrumb-actions">
                   {debugMode && (
@@ -494,6 +669,56 @@ function ControlPanel() {
                       </IconButton>
                     </Tooltip>
                   )}
+                  <Tooltip title="Document outline">
+                    <span>
+                      <IconButton
+                        size="small"
+                        onClick={(e) => setOutlineMenuAnchor(e.currentTarget)}
+                        disabled={documentOutline.length === 0}
+                        sx={{ p: 0.5 }}
+                      >
+                        <TocIcon sx={{ fontSize: 18 }} />
+                      </IconButton>
+                    </span>
+                  </Tooltip>
+                  <Menu
+                    anchorEl={outlineMenuAnchor}
+                    open={Boolean(outlineMenuAnchor)}
+                    onClose={() => setOutlineMenuAnchor(null)}
+                    anchorOrigin={{
+                      vertical: 'bottom',
+                      horizontal: 'right',
+                    }}
+                    transformOrigin={{
+                      vertical: 'top',
+                      horizontal: 'right',
+                    }}
+                    slotProps={{
+                      paper: {
+                        sx: { maxHeight: '60vh', minWidth: 200, maxWidth: 320 }
+                      }
+                    }}
+                  >
+                    <ListSubheader sx={{ fontSize: '11px', lineHeight: '24px', py: 0, textTransform: 'uppercase', letterSpacing: '0.5px', opacity: 0.7 }}>
+                      Document Outline
+                    </ListSubheader>
+                    {documentOutline.map((heading, idx) => (
+                      <MenuItem
+                        key={`${heading.id}-${idx}`}
+                        onClick={() => handleOutlineJump(heading.id)}
+                        sx={{
+                          fontSize: '12px',
+                          py: 0.25,
+                          minHeight: 28,
+                          pl: heading.level <= 1 ? 2 : heading.level * 1.5,
+                          fontWeight: heading.level <= 2 ? 600 : 400,
+                          opacity: heading.level >= 4 ? 0.7 : 1,
+                        }}
+                      >
+                        {heading.text}
+                      </MenuItem>
+                    ))}
+                  </Menu>
                   <Tooltip title="Show execution history">
                     <IconButton
                       size="small"
@@ -504,6 +729,27 @@ function ControlPanel() {
                     </IconButton>
                   </Tooltip>
                 </div>
+          </div>
+        )}
+        {showSearch && (
+          <div className="search-results-dropdown">
+            {filteredResults.length === 0 && searchQuery.trim() !== '' ? (
+              <div className="search-no-results">No documents found</div>
+            ) : filteredResults.length === 0 ? (
+              <div className="search-no-results">Loading...</div>
+            ) : (
+              filteredResults.map((item, index) => (
+                <div
+                  key={item.file}
+                  className={`search-result-item${index === selectedResultIndex ? ' selected' : ''}`}
+                  onClick={() => handleSearchSelect(item.file)}
+                  onMouseEnter={() => setSelectedResultIndex(index)}
+                >
+                  <div className="search-result-title">{item.title}</div>
+                  <div className="search-result-path">.cpdox/{item.file}</div>
+                </div>
+              ))
+            )}
           </div>
         )}
         <div className="content" ref={contentRef} onScroll={handleContentScroll}>

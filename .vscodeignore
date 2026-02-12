@@ -13,3 +13,23 @@ webview-ui/**
 src/**
 webpack.config.js
 .cpdox/**
+
+# Dev/documentation markdown files (README.md is kept by default)
+ANCHOR_LINKS_IMPLEMENTATION.md
+BUGS_IDENTIFIED.md
+IMPLEMENTATION.md
+QUICK_REFERENCE.md
+SUMMARY.md
+TESTING.md
+TESTING_STRATEGY_COMPLETE.md
+TEST_IMPLEMENTATION_SUMMARY.md
+WEBVIEW_BUGS_2026-02-07.md
+WEBVIEW_TEST_IMPLEMENTATION_SUMMARY.md
+WEBVIEW_TEST_PLAN.md
+
+# Dev-only files
+jest.config.js
+validate-tests.js
+scripts/**
+coverage/**
+.nyc_output/**
