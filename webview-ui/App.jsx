@@ -4,7 +4,7 @@ import * as runtime from 'react/jsx-runtime';
 import DescriptionIcon from '@mui/icons-material/Description';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
-import RestorePageIcon from '@mui/icons-material/RestorePage';
+import HistoryIcon from '@mui/icons-material/History';
 import WorkHistoryIcon from '@mui/icons-material/WorkHistory';
 import CloseIcon from '@mui/icons-material/Close';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
@@ -424,7 +424,7 @@ function ControlPanel() {
                           onClick={(e) => setHistoryMenuAnchor(e.currentTarget)}
                           sx={{ p: 0.5, mr: 0.5 }}
                         >
-                          <RestorePageIcon sx={{ fontSize: 16 }} />
+                          <HistoryIcon sx={{ fontSize: 16 }} />
                         </IconButton>
                       </Tooltip>
                       <Menu
