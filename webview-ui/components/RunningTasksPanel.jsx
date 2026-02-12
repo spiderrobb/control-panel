@@ -11,7 +11,7 @@ import ClearAllIcon from '@mui/icons-material/ClearAll';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 
-function RunningTasksPanel({ runningTasks, allTasks, onStop, onFocus, onOpenDefinition, onDismiss, onRestart, onShowLogs, onRequestLogBuffer, logBuffer, isCollapsed, onToggleCollapsed }) {
+function RunningTasksPanel({ runningTasks, allTasks, onStop, onFocus, onOpenDefinition, onDismiss, onRestart, onShowLogs, onRequestLogBuffer, logBuffer, isCollapsed, onToggleCollapsed, debugMode }) {
   const [showDebug, setShowDebug] = useState(false);
   const runningTasksList = Object.entries(runningTasks).filter(([_, state]) => state.running || state.failed || state.completed);
 
@@ -29,6 +29,12 @@ function RunningTasksPanel({ runningTasks, allTasks, onStop, onFocus, onOpenDefi
       setShowDebug(false);
     }
   }, [isCollapsed, showDebug]);
+
+  useEffect(() => {
+    if (!debugMode && showDebug) {
+      setShowDebug(false);
+    }
+  }, [debugMode, showDebug]);
 
   if (runningTasksList.length === 0) {
     return null;
@@ -78,23 +84,27 @@ function RunningTasksPanel({ runningTasks, allTasks, onStop, onFocus, onOpenDefi
               {isCollapsed ? <ExpandMoreIcon sx={{ fontSize: 18 }} /> : <ExpandLessIcon sx={{ fontSize: 18 }} />}
             </IconButton>
           </Tooltip>
-          <Button
-            variant="outlined"
-            size="small"
-            onClick={onShowLogs}
-            sx={{ minWidth: 'auto' }}
-          >
-            Show Logs
-          </Button>
-          <Button
-            variant="outlined"
-            size="small"
-            onClick={() => setShowDebug(!showDebug)}
-            sx={{ minWidth: 'auto' }}
-            disabled={isCollapsed}
-          >
-            {showDebug ? 'Hide Debug' : 'Debug Info'}
-          </Button>
+          {debugMode && (
+            <Button
+              variant="outlined"
+              size="small"
+              onClick={onShowLogs}
+              sx={{ minWidth: 'auto' }}
+            >
+              Show Logs
+            </Button>
+          )}
+          {debugMode && (
+            <Button
+              variant="outlined"
+              size="small"
+              onClick={() => setShowDebug(!showDebug)}
+              sx={{ minWidth: 'auto' }}
+              disabled={isCollapsed}
+            >
+              {showDebug ? 'Hide Debug' : 'Debug Info'}
+            </Button>
+          )}
         </div>
       </div>
       {!isCollapsed && showDebug && (

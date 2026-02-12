@@ -187,7 +187,7 @@ describe('RunningTasksPanel', () => {
         test: createRunningTaskState('test')
       };
 
-      renderPanel({ runningTasks, onShowLogs });
+      renderPanel({ runningTasks, onShowLogs, debugMode: true });
 
       await user.click(screen.getByText('Show Logs'));
 
@@ -269,7 +269,7 @@ describe('RunningTasksPanel', () => {
         test: createRunningTaskState('test')
       };
 
-      renderPanel({ runningTasks });
+      renderPanel({ runningTasks, debugMode: true });
 
       // Click Debug Info button
       await user.click(screen.getByText('Debug Info'));
@@ -294,7 +294,7 @@ describe('RunningTasksPanel', () => {
         test: createRunningTaskState('test')
       };
 
-      renderPanel({ runningTasks });
+      renderPanel({ runningTasks, debugMode: true });
 
       await user.click(screen.getByText('Debug Info'));
 
@@ -309,7 +309,7 @@ describe('RunningTasksPanel', () => {
         test: createRunningTaskState('test')
       };
 
-      renderPanel({ runningTasks, logBuffer: sampleLogBuffer });
+      renderPanel({ runningTasks, logBuffer: sampleLogBuffer, debugMode: true });
 
       await user.click(screen.getByText('Debug Info'));
 
@@ -327,7 +327,7 @@ describe('RunningTasksPanel', () => {
         test: createRunningTaskState('test')
       };
 
-      renderPanel({ runningTasks, onRequestLogBuffer });
+      renderPanel({ runningTasks, onRequestLogBuffer, debugMode: true });
 
       await user.click(screen.getByText('Debug Info'));
 
@@ -347,7 +347,7 @@ describe('RunningTasksPanel', () => {
         test: createRunningTaskState('test')
       };
 
-      renderPanel({ runningTasks, isCollapsed: true });
+      renderPanel({ runningTasks, isCollapsed: true, debugMode: true });
 
       const debugButton = screen.getByText('Debug Info');
       expect(debugButton.closest('button')).toBeDisabled();

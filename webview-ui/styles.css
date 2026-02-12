@@ -80,42 +80,93 @@ body {
 .content {
   flex: 1;
   overflow-y: auto;
-  padding: 16px;
+  padding: 0;
   line-height: 1.6;
   scroll-behavior: smooth;
+
+  /* Height of the compact sticky heading */
+  --sticky-heading-height: 36px;
+  /* Horizontal inset for content */
+  --content-padding: 16px;
+}
+
+/* Apply horizontal padding to direct content inside sections */
+.content > *,
+.content .heading-section > * {
+  padding-left: var(--content-padding);
+  padding-right: var(--content-padding);
+}
+
+/* ===== Section wrappers for sticky heading scoping ===== */
+.content .heading-section {
+  position: relative;
+}
+
+/* Move vertical spacing to the section so margins don't create a gap above sticky headings */
+.content .heading-section > h1,
+.content .heading-section > h2,
+.content .heading-section > h3,
+.content .heading-section > h4,
+.content .heading-section > h5,
+.content .heading-section > h6 {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background-color: var(--vscode-editor-background);
+  margin-top: 0;
+  margin-left: calc(-1 * var(--content-padding));
+  margin-right: calc(-1 * var(--content-padding));
+  padding-left: var(--content-padding);
+  padding-right: var(--content-padding);
+}
+
+/* Subtle bottom edge on sticky headings — uses a pseudo-element so it doesn't affect layout */
+.content .heading-section > h1::after,
+.content .heading-section > h2::after,
+.content .heading-section > h3::after,
+.content .heading-section > h4::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 1px;
+  background: var(--vscode-panel-border);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
 }
 
 /* Markdown Styles */
 .content h1 {
   font-size: 2em;
   font-weight: 600;
-  margin-top: 24px;
+  padding-top: 24px;
   margin-bottom: 16px;
   border-bottom: 1px solid var(--vscode-panel-border);
   padding-bottom: 8px;
-  scroll-margin-top: 20px;
+  scroll-margin-top: calc(var(--sticky-heading-height) + 8px);
 }
 
 .content h2 {
   font-size: 1.5em;
   font-weight: 600;
-  margin-top: 24px;
+  padding-top: 24px;
   margin-bottom: 12px;
-  scroll-margin-top: 20px;
+  scroll-margin-top: calc(var(--sticky-heading-height) + 8px);
 }
 
 .content h3 {
   font-size: 1.25em;
   font-weight: 600;
-  margin-top: 16px;
+  padding-top: 16px;
   margin-bottom: 8px;
-  scroll-margin-top: 20px;
+  scroll-margin-top: calc(var(--sticky-heading-height) + 8px);
 }
 
 .content h4,
 .content h5,
 .content h6 {
-  scroll-margin-top: 20px;
+  padding-top: 12px;
+  scroll-margin-top: calc(var(--sticky-heading-height) + 8px);
 }
 
 .content p {

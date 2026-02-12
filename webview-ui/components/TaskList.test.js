@@ -139,6 +139,29 @@ describe('TaskList Component', () => {
     });
   });
 
+  // ─── Sort Order ─────────────────────────────────────────────
+
+  describe('Sort Order', () => {
+    test('sorts Workspace tasks before npm tasks, then groups npm by path alphabetically', () => {
+      const mixedTasks = [
+        createMockTask('zeta', { source: 'npm', definition: { type: 'npm', script: 'zeta', path: '/workspaces/b-pkg' } }),
+        createMockTask('alpha', { source: 'npm', definition: { type: 'npm', script: 'alpha', path: '/workspaces/b-pkg' } }),
+        createMockTask('build', { source: 'Workspace' }),
+        createMockTask('gamma', { source: 'npm', definition: { type: 'npm', script: 'gamma', path: '/workspaces/a-pkg' } }),
+        createMockTask('lint', { source: 'Workspace' }),
+      ];
+
+      const { container } = renderTaskList({ tasks: mixedTasks, labelStartsWith: '' });
+
+      const items = container.querySelectorAll('li');
+      const labels = Array.from(items).map(li => li.textContent);
+
+      // Workspace tasks first (alphabetical), then npm grouped by path (alphabetical within each)
+      // TaskLink renders an "npm" source chip for npm tasks, included in textContent
+      expect(labels).toEqual(['build', 'lint', 'npmgamma', 'npmalpha', 'npmzeta']);
+    });
+  });
+
   // ─── Props Passthrough ─────────────────────────────────────
 
   describe('Props Passthrough', () => {

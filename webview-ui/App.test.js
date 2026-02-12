@@ -357,6 +357,9 @@ describe('App Component', () => {
         expect(screen.getByText('Compiled MDX Content')).toBeInTheDocument();
       });
 
+      // Enable debug mode first — the copy button is only visible in debug mode
+      sendMessage('debugMode', { enabled: true });
+
       await user.click(screen.getByLabelText('Copy fetchTasks() JSON'));
 
       expect(mockVscodeApi.postMessage).toHaveBeenCalledWith({ type: 'copyTasksJson' });

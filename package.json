@@ -48,7 +48,17 @@
         "title": "Control Panel: Refresh View",
         "icon": "$(refresh)"
       }
-    ]
+    ],
+    "configuration": {
+      "title": "Control Panel",
+      "properties": {
+        "controlpanel.debugMode": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable debug mode to show diagnostic tools: copy fetchTasks JSON, show logs, and debug info panel."
+        }
+      }
+    }
   },
   "scripts": {
     "multi-source:test": "echo 'Running multi-source tests from package.json...' && sleep 3",
@@ -65,7 +75,7 @@
     "coverage": "npm run coverage:all",
     "coverage:extension": "nyc --reporter=json --reporter=text --report-dir=coverage/extension npx mocha test/pure-functions.test.js test/logger.test.js test/process-lifecycle.test.js test/failure-scenarios.test.js test/concurrency.test.js test/resource-management.test.js test/integration-stress.test.js test/extension.test.js --ui tdd --timeout 30000",
     "coverage:webview": "jest --coverage --coverageDirectory=coverage/webview",
-    "coverage:all": "npm run coverage:extension && npm run coverage:webview && nyc merge coverage/extension coverage/webview --temp-dir coverage/.nyc_output && nyc report --temp-dir coverage/.nyc_output --reporter=html --reporter=text --report-dir=coverage --check-coverage --lines 80",
+    "coverage:all": "npm run coverage:extension && npm run coverage:webview && mkdir -p coverage/.nyc_merge && cp coverage/extension/coverage-final.json coverage/.nyc_merge/extension.json && cp coverage/webview/coverage-final.json coverage/.nyc_merge/webview.json && nyc merge coverage/.nyc_merge coverage/.nyc_output/merged.json && nyc report --temp-dir coverage/.nyc_output --reporter=html --reporter=text --report-dir=coverage --check-coverage --lines 80",
     "package": "vsce package --allow-missing-repository --allow-star-activation --no-yarn"
   },
   "dependencies": {

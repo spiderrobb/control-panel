@@ -26,6 +26,44 @@ import StarredTasksList from './components/StarredTasksList';
 import ExecutionHistoryPanel from './components/ExecutionHistoryPanel';
 
 import { TaskStateProvider, useTaskState, vscode } from './context';
+import rehypeSectionHeadings from './plugins/rehype-section-headings';
+
+// --- Heading components with headingLevel tags for SectionWrapper ---
+function H1Component(props) {
+  const id = generateHeadingId(props.children);
+  return <h1 id={id} {...props} />;
+}
+H1Component.headingLevel = 1;
+
+function H2Component(props) {
+  const id = generateHeadingId(props.children);
+  return <h2 id={id} {...props} />;
+}
+H2Component.headingLevel = 2;
+
+function H3Component(props) {
+  const id = generateHeadingId(props.children);
+  return <h3 id={id} {...props} />;
+}
+H3Component.headingLevel = 3;
+
+function H4Component(props) {
+  const id = generateHeadingId(props.children);
+  return <h4 id={id} {...props} />;
+}
+H4Component.headingLevel = 4;
+
+function H5Component(props) {
+  const id = generateHeadingId(props.children);
+  return <h5 id={id} {...props} />;
+}
+H5Component.headingLevel = 5;
+
+function H6Component(props) {
+  const id = generateHeadingId(props.children);
+  return <h6 id={id} {...props} />;
+}
+H6Component.headingLevel = 6;
 
 // Utility to generate heading IDs from text (slug generation)
 function generateHeadingId(text) {
@@ -68,6 +106,7 @@ function ControlPanel() {
       executionHistory, 
       runningTasksCollapsed, 
       starredTasksCollapsed,
+      debugMode,
       onRun,
       onStop,
       onFocus,
@@ -182,30 +221,12 @@ function ControlPanel() {
     // All Material UI icons
     ...MuiIcons,
     // Custom heading components with ID attributes for anchor linking
-    h1: (props) => {
-      const id = generateHeadingId(props.children);
-      return <h1 id={id} {...props} />;
-    },
-    h2: (props) => {
-      const id = generateHeadingId(props.children);
-      return <h2 id={id} {...props} />;
-    },
-    h3: (props) => {
-      const id = generateHeadingId(props.children);
-      return <h3 id={id} {...props} />;
-    },
-    h4: (props) => {
-      const id = generateHeadingId(props.children);
-      return <h4 id={id} {...props} />;
-    },
-    h5: (props) => {
-      const id = generateHeadingId(props.children);
-      return <h5 id={id} {...props} />;
-    },
-    h6: (props) => {
-      const id = generateHeadingId(props.children);
-      return <h6 id={id} {...props} />;
-    },
+    h1: H1Component,
+    h2: H2Component,
+    h3: H3Component,
+    h4: H4Component,
+    h5: H5Component,
+    h6: H6Component,
     // Custom link handler for .mdx navigation and anchor links
     a: (props) => {
       if (props.href?.endsWith('.mdx')) {
@@ -232,8 +253,10 @@ function ControlPanel() {
               if (targetElement && contentRef.current) {
                 const contentTop = contentRef.current.offsetTop;
                 const elementTop = targetElement.offsetTop;
+                // Account for the single sticky heading
+                const stickyOffset = 52;
                 contentRef.current.scrollTo({
-                  top: elementTop - contentTop - 16, // 16px padding offset
+                  top: elementTop - contentTop - stickyOffset,
                   behavior: 'smooth'
                 });
                 // Remove focus from the link to prevent scroll-to-top bug
@@ -263,6 +286,7 @@ function ControlPanel() {
         const { default: MDXComponent } = await evaluate(mdxContent, {
           ...runtime,
           development: false,
+          rehypePlugins: [rehypeSectionHeadings],
           useMDXComponents: () => mdxComponents
         });
         setMdxModule(() => MDXComponent);
@@ -318,9 +342,10 @@ function ControlPanel() {
       if (targetElement) {
         const contentTop = contentRef.current.offsetTop;
         const elementTop = targetElement.offsetTop;
+        const stickyOffset = 52;
         requestAnimationFrame(() => {
           contentRef.current.scrollTo({
-            top: elementTop - contentTop - 16,
+            top: elementTop - contentTop - stickyOffset,
             behavior: 'smooth'
           });
         });
@@ -489,15 +514,17 @@ function ControlPanel() {
                   </span>
                 </div>
                 <div className="breadcrumb-actions">
-                  <Tooltip title="Copy fetchTasks() JSON">
-                    <IconButton
-                      size="small"
-                      onClick={handleCopyTasksJson}
-                      sx={{ p: 0.5, ml: 0.5 }}
-                    >
-                      <ContentCopyIcon sx={{ fontSize: 18 }} />
-                    </IconButton>
-                  </Tooltip>
+                  {debugMode && (
+                    <Tooltip title="Copy fetchTasks() JSON">
+                      <IconButton
+                        size="small"
+                        onClick={handleCopyTasksJson}
+                        sx={{ p: 0.5, ml: 0.5 }}
+                      >
+                        <ContentCopyIcon sx={{ fontSize: 18 }} />
+                      </IconButton>
+                    </Tooltip>
+                  )}
                   <Tooltip title="Show execution history">
                     <IconButton
                       size="small"
@@ -534,6 +561,7 @@ function ControlPanel() {
           logBuffer={logBuffer}
           isCollapsed={runningTasksCollapsed}
           onToggleCollapsed={onToggleRunningTasksCollapsed}
+          debugMode={debugMode}
         />
         <RecentTasksList 
           tasks={recentlyUsedTasks}

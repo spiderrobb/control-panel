@@ -228,6 +228,17 @@ class MdxWebviewProvider {
     });
   }
 
+  /**
+   * Read the controlpanel.debugMode setting and push it to the webview.
+   */
+  sendDebugModeSetting() {
+    const debugMode = vscode.workspace.getConfiguration('controlpanel').get('debugMode', false);
+    this._view?.webview.postMessage({
+      type: 'debugMode',
+      enabled: debugMode
+    });
+  }
+
   async updatePanelState(partialState) {
     return this._withStateLock(async () => {
       const current = await this.getPanelState();
@@ -746,6 +757,7 @@ class MdxWebviewProvider {
           await this.restoreNavigationState();
           await this.sendTasksToWebview();
           await this.restoreRunningTasksState();
+          this.sendDebugModeSetting();
           break;
         case 'navigate':
           await this.loadMdxFile(message.file);

@@ -19,6 +19,15 @@ function activate(context) {
 		vscode.window.registerWebviewViewProvider('controlpanel.mdxView', provider)
 	);
 
+	// Push debug mode setting to webview whenever it changes
+	context.subscriptions.push(
+		vscode.workspace.onDidChangeConfiguration(e => {
+			if (e.affectsConfiguration('controlpanel.debugMode')) {
+				provider.sendDebugModeSetting();
+			}
+		})
+	);
+
 	// Register commands
 	context.subscriptions.push(
 		vscode.commands.registerCommand('controlpanel.openMdx', async () => {

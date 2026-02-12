@@ -31,6 +31,7 @@ export function TaskStateProvider({ children }) {
   const [executionHistory, setExecutionHistory] = useState([]);
   const [runningTasksCollapsed, setRunningTasksCollapsed] = useState(false);
   const [starredTasksCollapsed, setStarredTasksCollapsed] = useState(false);
+  const [debugMode, setDebugMode] = useState(false);
 
   // Compute average durations from execution history
   const taskHistoryMap = useMemo(() => {
@@ -385,6 +386,9 @@ export function TaskStateProvider({ children }) {
               setStarredTasksCollapsed(Boolean(message.state.starredTasksCollapsed));
           }
           break;
+        case 'debugMode':
+          setDebugMode(Boolean(message.enabled));
+          break;
       }
     };
 
@@ -407,6 +411,7 @@ export function TaskStateProvider({ children }) {
     taskHistoryMap,
     runningTasksCollapsed,
     starredTasksCollapsed,
+    debugMode,
     onRun: handleRunTask,
     onStop: handleStopTask,
     onFocus: handleFocusTerminal,

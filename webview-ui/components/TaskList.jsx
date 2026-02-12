@@ -5,7 +5,24 @@ function TaskList({ labelStartsWith, tasks, disabled }) {
 
   const filteredTasks = tasks
     .filter(task => task.label.startsWith(labelStartsWith))
-    .sort((a, b) => a.label.localeCompare(b.label));
+    .sort((a, b) => {
+      const aIsWorkspace = a.source === 'Workspace';
+      const bIsWorkspace = b.source === 'Workspace';
+
+      // tasks.json (Workspace) tasks come first
+      if (aIsWorkspace && !bIsWorkspace) return -1;
+      if (!aIsWorkspace && bIsWorkspace) return 1;
+
+      // Within non-Workspace tasks, group by npm workspace path
+      if (!aIsWorkspace && !bIsWorkspace) {
+        const aPath = a.definition?.path || '';
+        const bPath = b.definition?.path || '';
+        if (aPath !== bPath) return aPath.localeCompare(bPath);
+      }
+
+      // Within each group, sort alphabetically
+      return a.label.localeCompare(b.label);
+    });
 
   if (filteredTasks.length === 0) {
     return (
