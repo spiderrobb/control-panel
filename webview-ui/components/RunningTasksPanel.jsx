@@ -279,7 +279,7 @@ function RunningTaskItem({ label, state, onStop, onFocus, onOpenDefinition, onDi
             ) : (
               <>
                 <span className="task-runtime">{formatRuntime(runtime)}</span>
-                {avgDuration && !isFirstRun && runtime <= 60000 && (
+                {avgDuration && !isFirstRun && (
                   <span className="task-progress-text">{Math.floor(progress)}%</span>
                 )}
               </>
@@ -339,14 +339,14 @@ function RunningTaskItem({ label, state, onStop, onFocus, onOpenDefinition, onDi
             ) : null}
           </div>
         </div>
-        {!isCompleted && avgDuration && !isFirstRun && runtime <= 60000 && (
+        {!isCompleted && !isFailed && avgDuration && !isFirstRun && (
           <LinearProgress
             variant="determinate"
             value={progress}
             sx={{ width: '100%', height: 4, mt: 0.5 }}
           />
         )}
-        {!isCompleted && isFirstRun && (
+        {!isCompleted && !isFailed && isFirstRun && (
           <LinearProgress
             sx={{ width: '100%', height: 4, mt: 0.5 }}
           />

@@ -13,6 +13,24 @@ import StarBorderIcon from '@mui/icons-material/StarBorder';
 import { useTaskState } from '../context';
 import Segment, { getNpmColor } from './Segment';
 
+// Source-agnostic lookup: finds a running task state by trying exact match,
+// then by extracting the label part from "Source|Name" formatted keys.
+function findTaskState(runningTasks, idOrLabel) {
+  if (!idOrLabel) return undefined;
+  // Exact match
+  if (runningTasks[idOrLabel]) return runningTasks[idOrLabel];
+  // Extract label part from id (e.g. "package" from "Workspace|package")
+  const labelPart = idOrLabel.includes('|') ? idOrLabel.split('|')[1] : null;
+  if (labelPart && runningTasks[labelPart]) return runningTasks[labelPart];
+  // Scan all keys for any whose label part matches our label part or raw value
+  const needle = labelPart || idOrLabel;
+  for (const key of Object.keys(runningTasks)) {
+    const keyLabel = key.includes('|') ? key.split('|')[1] : key;
+    if (keyLabel === needle) return runningTasks[key];
+  }
+  return undefined;
+}
+
 function TaskLink({ label, taskId, displayLabel, disabled = false }) {
   const {
       tasks,
@@ -58,7 +76,7 @@ function TaskLink({ label, taskId, displayLabel, disabled = false }) {
   // For npm tasks, use script name from definition, otherwise use displayLabel/label
   const displayText = isNpmTask && scriptName ? scriptName : (displayLabel || resolvedLabel);
 
-  const taskState = runningTasks[resolvedId] || runningTasks[label];
+  const taskState = findTaskState(runningTasks, resolvedId) || findTaskState(runningTasks, label);
 
   const isRunning = taskState?.running || false;
   const isFailed = taskState?.failed || false;
@@ -86,9 +104,16 @@ function TaskLink({ label, taskId, displayLabel, disabled = false }) {
     return out;
   }, []);
 
+  // Helper: extract the label portion from a "Source|Name" formatted key
+  const extractLabel = useCallback((key) => {
+    if (!key) return key;
+    return key.includes('|') ? key.split('|')[1] : key;
+  }, []);
+
   const treeConflictDisabled = useMemo(() => {
     const myKey = resolvedId || label;
     if (!myKey) return false;
+    const myLabel = extractLabel(myKey);
 
     // 1) Is this task a descendant of any OTHER running task's tree?
     //    Walk every task with dependsOn and check if it's running and
@@ -97,36 +122,41 @@ function TaskLink({ label, taskId, displayLabel, disabled = false }) {
       if (!task.dependsOn?.length) continue;
       const taskKey = task.id || task.label;
       // Skip self — we don't need to disable if WE are the root
-      if (taskKey === myKey) continue;
+      if (taskKey === myKey || extractLabel(taskKey) === myLabel) continue;
 
-      // Check if that root task is running
-      const rootState = runningTasks[taskKey] || runningTasks[task.label];
+      // Check if that root task is running (source-agnostic)
+      const rootState = findTaskState(runningTasks, taskKey) || findTaskState(runningTasks, task.label);
       if (!rootState?.running) continue;
 
       // Collect all descendant keys of that running tree
       const descendantKeys = collectTreeKeys(task.dependsOn);
+      // Check by exact key match first
       if (descendantKeys.has(myKey) || descendantKeys.has(resolvedId) || descendantKeys.has(label)) {
         return true;
+      }
+      // Check by label-part match (handles source mismatch)
+      for (const descKey of descendantKeys) {
+        if (extractLabel(descKey) === myLabel) return true;
       }
     }
 
     // 2) Does this task have a descendant that is currently running
     //    independently (i.e. running outside of our own tree)?
+    //    Skip this check when WE are already running — our descendants
+    //    running is expected because we started them as our own tree.
     if (hasDependencies) {
-      const myDescendants = collectTreeKeys(dependencyTree);
-      for (const key of myDescendants) {
-        const state = runningTasks[key];
-        if (state?.running) return true;
-        // Also check by label extracted from id (source|label|path)
-        if (!state && key.includes('|')) {
-          const labelPart = key.split('|')[1];
-          if (runningTasks[labelPart]?.running) return true;
+      const myState = findTaskState(runningTasks, myKey);
+      if (!myState?.running) {
+        const myDescendants = collectTreeKeys(dependencyTree);
+        for (const key of myDescendants) {
+          const state = findTaskState(runningTasks, key);
+          if (state?.running) return true;
         }
       }
     }
 
     return false;
-  }, [tasks, runningTasks, resolvedId, label, dependencyTree, hasDependencies, collectTreeKeys]);
+  }, [tasks, runningTasks, resolvedId, label, dependencyTree, hasDependencies, collectTreeKeys, extractLabel]);
 
   const effectiveDisabled = disabled || treeConflictDisabled;
 
@@ -205,29 +235,22 @@ function TaskLink({ label, taskId, displayLabel, disabled = false }) {
 
   // --- Callbacks passed down to Segment ---
 
-  // Resolve running state — context keys by label, but tree nodes use id
+  // Resolve running state — source-agnostic lookup handles mismatched sources
   const resolveRunningState = useCallback((taskIdOrLabel) => {
-    if (!taskIdOrLabel) return undefined;
-    // Try exact match first (works for labels and ids that match context keys)
-    if (runningTasks[taskIdOrLabel]) return runningTasks[taskIdOrLabel];
-    // If taskIdOrLabel looks like an id (source|label|path), extract label part
-    const parts = taskIdOrLabel.split('|');
-    if (parts.length >= 2) {
-      const labelPart = parts[1];
-      if (runningTasks[labelPart]) return runningTasks[labelPart];
-    }
-    return undefined;
+    return findTaskState(runningTasks, taskIdOrLabel);
   }, [runningTasks]);
 
   const getSegmentState = useCallback((taskIdOrLabel) => {
+    if (disabled) return 'idle';
     const state = resolveRunningState(taskIdOrLabel);
     if (state?.failed) return 'error';
     if (state?.running) return 'running';
     if (state?.completed) return 'success';
     return 'idle';
-  }, [resolveRunningState]);
+  }, [resolveRunningState, disabled]);
 
   const getProgressInfo = useCallback((taskIdOrLabel) => {
+    if (disabled) return { progress: 0, indeterminate: false };
     const state = resolveRunningState(taskIdOrLabel);
     if (state?.failed) return { progress: 100, indeterminate: false };
     if (!state?.running || !state?.startTime) return { progress: 0, indeterminate: false };
@@ -237,7 +260,7 @@ function TaskLink({ label, taskId, displayLabel, disabled = false }) {
     const elapsed = now - state.startTime;
     const progressValue = Math.min((elapsed / state.avgDuration) * 100, 99);
     return { progress: progressValue, indeterminate: false };
-  }, [runningTasks, segmentTick]);
+  }, [runningTasks, segmentTick, disabled]);
 
   const getSegmentDisplayLabel = useCallback((task) => {
     if (!task) return '';
@@ -413,7 +436,9 @@ function TaskLink({ label, taskId, displayLabel, disabled = false }) {
     : {};
 
   // --- Running / Failed state ---
-  if (isRunning || isFailed) {
+  // When the task is running as a dependency of another task (tree-conflict),
+  // render it as disabled/idle instead of showing the interactive running UI.
+  if ((isRunning || isFailed) && !treeConflictDisabled) {
     const content = (
       <>
         <div className="task-link running">

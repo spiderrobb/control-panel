@@ -3,9 +3,9 @@ import TaskLink from './TaskLink';
 
 function TaskList({ labelStartsWith, tasks, disabled }) {
 
-  const filteredTasks = tasks.filter(task => 
-    task.label.startsWith(labelStartsWith)
-  );
+  const filteredTasks = tasks
+    .filter(task => task.label.startsWith(labelStartsWith))
+    .sort((a, b) => a.label.localeCompare(b.label));
 
   if (filteredTasks.length === 0) {
     return (

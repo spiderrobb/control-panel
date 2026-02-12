@@ -395,10 +395,21 @@ class MdxWebviewProvider {
   // that lists the given task as a dependency and registers the relationship so
   // that ensureParentRunning can make the parent visible in the UI immediately.
   async discoverParentTasks(taskId) {
-    // If already registered as a subtask of some parent, nothing to discover
+    // If already registered as a subtask of some parent, nothing to discover.
+    // Use label-part matching to handle source mismatches.
+    const taskLabelPart = taskId.includes('|') ? taskId.split('|')[1] : taskId;
     let alreadyHasParent = false;
     this._taskHierarchy.forEach((subtasks) => {
-      if (subtasks.has(taskId)) alreadyHasParent = true;
+      if (subtasks.has(taskId)) { alreadyHasParent = true; return; }
+      for (const sub of subtasks) {
+        const subLabel = sub.includes('|') ? sub.split('|')[1] : sub;
+        if (subLabel === taskLabelPart) {
+          // Also register the actual taskId for direct lookups
+          subtasks.add(taskId);
+          alreadyHasParent = true;
+          return;
+        }
+      }
     });
     if (alreadyHasParent) return;
 
@@ -445,13 +456,19 @@ class MdxWebviewProvider {
           this._runningTasks.set(candidateId, parentExec);
         }
 
-        // Register ALL of this parent's dependencies (not just ours)
+        // Register ALL of this parent's dependencies (not just ours).
+        // Also register the actual taskId if the resolved variant differs
+        // (handles source mismatches like Workspace|package vs npm|package).
         for (const depName of depNames) {
           const depTask = this._resolveTaskByName(allTasks, depName);
           if (depTask) {
             const depId = this.getTaskId(depTask);
             if (depId !== candidateId) {
               this.addSubtask(candidateId, depId);
+              // If the running task's actual ID differs from resolved, register both
+              if (depName === taskLabelPart && depId !== taskId) {
+                this.addSubtask(candidateId, taskId);
+              }
             }
           }
         }
@@ -1699,9 +1716,25 @@ class MdxWebviewProvider {
     // Check if this task is a subtask of any running task.
     // We await ensureParentRunning so the parent's taskStarted message is
     // guaranteed to reach the webview before the child's.
+    // Use label-part matching to handle source mismatches (e.g. hierarchy
+    // registered "Workspace|package" but actual execution is "npm|package").
+    const taskLabelPart = taskId.includes('|') ? taskId.split('|')[1] : taskId;
     let parentTaskId = null;
     for (const [parentId, subtasks] of this._taskHierarchy) {
-      if (subtasks.has(taskId)) {
+      let isChild = subtasks.has(taskId);
+      if (!isChild) {
+        // Fallback: check if any subtask has the same label part
+        for (const sub of subtasks) {
+          const subLabel = sub.includes('|') ? sub.split('|')[1] : sub;
+          if (subLabel === taskLabelPart) {
+            isChild = true;
+            // Also register the actual taskId so future lookups are direct
+            subtasks.add(taskId);
+            break;
+          }
+        }
+      }
+      if (isChild) {
         parentTaskId = parentId;
         try {
           await this.ensureParentRunning(parentId);
