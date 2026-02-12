@@ -1001,10 +1001,9 @@ class MdxWebviewProvider {
     let history = await this.getNavigationHistory();
     
     if (targetIndex >= 0 && targetIndex < history.length) {
-      // Navigate to the item and truncate forward history (browser-like behavior)
-      history = history.slice(0, targetIndex + 1);
-      await this.updateNavigationHistory(history, targetIndex);
-      await this.loadMdxFile(history[targetIndex], true); // skipHistory = true
+      // Append the selected item to the end of history (no truncation)
+      const fileName = history[targetIndex];
+      await this.loadMdxFile(fileName); // skipHistory = false, appends to history
     }
   }
 

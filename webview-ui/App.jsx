@@ -4,13 +4,12 @@ import * as runtime from 'react/jsx-runtime';
 import DescriptionIcon from '@mui/icons-material/Description';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
-import MoreVertIcon from '@mui/icons-material/MoreVert';
-import HistoryIcon from '@mui/icons-material/History';
+import RestorePageIcon from '@mui/icons-material/RestorePage';
+import WorkHistoryIcon from '@mui/icons-material/WorkHistory';
 import CloseIcon from '@mui/icons-material/Close';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import Button from '@mui/material/Button';
 import IconButton from '@mui/material/IconButton';
-import Divider from '@mui/material/Divider';
 import ListSubheader from '@mui/material/ListSubheader';
 import Menu from '@mui/material/Menu';
 import MenuItem from '@mui/material/MenuItem';
@@ -174,11 +173,6 @@ function ControlPanel() {
 
   const handleNavigateForward = () => {
     vscode.postMessage({ type: 'navigateForward' });
-  };
-
-  const handleNavigateToHistory = (index) => {
-    vscode.postMessage({ type: 'navigateToHistoryItem', index });
-    setHistoryMenuAnchor(null);
   };
 
   const handleShowLogs = () => {
@@ -367,7 +361,7 @@ function ControlPanel() {
       <div className="app">
           <div className="breadcrumb">
             <div className="breadcrumb-trail">
-                  <HistoryIcon sx={{ fontSize: 16, mr: 0.5, verticalAlign: 'text-bottom' }} />
+                  <WorkHistoryIcon sx={{ fontSize: 16, mr: 0.5, verticalAlign: 'text-bottom' }} />
                   <span className="current-file">Task Execution History</span>
             </div>
             <div className="breadcrumb-actions">
@@ -424,13 +418,13 @@ function ControlPanel() {
                   </Tooltip>
                   {navigationHistory.length > 0 && (
                     <>
-                      <Tooltip title="History & Recent Documents">
+                      <Tooltip title="Recent Documents">
                         <IconButton
                           size="small"
                           onClick={(e) => setHistoryMenuAnchor(e.currentTarget)}
                           sx={{ p: 0.5, mr: 0.5 }}
                         >
-                          <MoreVertIcon sx={{ fontSize: 16 }} />
+                          <RestorePageIcon sx={{ fontSize: 16 }} />
                         </IconButton>
                       </Tooltip>
                       <Menu
@@ -448,42 +442,28 @@ function ControlPanel() {
                         }}
                       >
                         <ListSubheader sx={{ fontSize: '11px', lineHeight: '24px', py: 0, textTransform: 'uppercase', letterSpacing: '0.5px', opacity: 0.7 }}>
-                          History
+                          Recent Documents
                         </ListSubheader>
-                        {navigationHistory.map((file, index) => (
-                          <MenuItem
-                            key={`hist-${index}`}
-                            onClick={() => handleNavigateToHistory(index)}
-                            selected={index === navigationIndex}
-                            sx={{ fontSize: '12px', py: 0.25, minHeight: 28 }}
-                          >
-                            {file}
-                          </MenuItem>
-                        ))}
                         {(() => {
-                          const recentDocs = [...new Set(navigationHistory)].filter(f => f !== currentFile).slice(0, 8);
-                          if (recentDocs.length === 0) return null;
-                          return (
-                            <>
-                              <Divider sx={{ my: 0.5 }} />
-                              <ListSubheader sx={{ fontSize: '11px', lineHeight: '24px', py: 0, textTransform: 'uppercase', letterSpacing: '0.5px', opacity: 0.7 }}>
-                                Recent Documents
-                              </ListSubheader>
-                              {recentDocs.map((file) => (
-                                <MenuItem
-                                  key={`recent-${file}`}
-                                  onClick={() => {
-                                    handleNavigate(file);
-                                    setHistoryMenuAnchor(null);
-                                  }}
-                                  sx={{ fontSize: '12px', py: 0.25, minHeight: 28 }}
-                                >
-                                  <DescriptionIcon sx={{ fontSize: 14, mr: 1, opacity: 0.6 }} />
-                                  {file}
-                                </MenuItem>
-                              ))}
-                            </>
+                          const recentDocs = [...new Set(navigationHistory)].filter(f => f !== currentFile).slice(0, 16);
+                          if (recentDocs.length === 0) return (
+                            <MenuItem disabled sx={{ fontSize: '12px', py: 0.25, minHeight: 28, opacity: 0.5 }}>
+                              No recent documents
+                            </MenuItem>
                           );
+                          return recentDocs.map((file) => (
+                            <MenuItem
+                              key={`recent-${file}`}
+                              onClick={() => {
+                                handleNavigate(file);
+                                setHistoryMenuAnchor(null);
+                              }}
+                              sx={{ fontSize: '12px', py: 0.25, minHeight: 28 }}
+                            >
+                              <DescriptionIcon sx={{ fontSize: 14, mr: 1, opacity: 0.6 }} />
+                              {file}
+                            </MenuItem>
+                          ));
                         })()}
                       </Menu>
                     </>
@@ -491,19 +471,8 @@ function ControlPanel() {
                 </div>
                 <div className="breadcrumb-trail">
                   <DescriptionIcon sx={{ fontSize: 16, mr: 0.5, verticalAlign: 'text-bottom' }} />
-                  {navigationHistory.length > 1 && navigationIndex > 0 && (
-                    <>
-                      <span
-                        className="previous-file"
-                        onClick={() => handleNavigateToHistory(navigationIndex - 1)}
-                        style={{ cursor: 'pointer' }}
-                        title="Go back"
-                      >
-                        {navigationHistory[navigationIndex - 1]}
-                      </span>
-                      <span className="breadcrumb-separator"> &gt; </span>
-                    </>
-                  )}
+                  <span className="breadcrumb-path">.cpdox</span>
+                  <span className="breadcrumb-separator"> / </span>
                   <span 
                     className="current-file" 
                     onClick={() => vscode.postMessage({ type: 'openCurrentFile', file: currentFile })}
@@ -531,7 +500,7 @@ function ControlPanel() {
                       onClick={handleToggleHistory}
                       sx={{ p: 0.5 }}
                     >
-                      <HistoryIcon sx={{ fontSize: 18 }} />
+                      <WorkHistoryIcon sx={{ fontSize: 18 }} />
                     </IconButton>
                   </Tooltip>
                 </div>
